@@ -27,27 +27,6 @@ namespace FEX::FormatCheck {
       return false;
     }
 
-    if (!File.seekg(0, std::fstream::end)) {
-      return false;
-    }
-
-    auto FileSize = File.tellg();
-    if (File.fail()) {
-      return false;
-    }
-
-    if (FileSize <= 0) {
-      return false;
-    }
-
-    if (!File.seekg(0, std::fstream::beg)) {
-      return false;
-    }
-
-    if (FileSize < sizeof(SquashFSHeader)) {
-      return false;
-    }
-
     if (!File.read(reinterpret_cast<char*>(&Header), sizeof(SquashFSHeader))) {
       return false;
     }
