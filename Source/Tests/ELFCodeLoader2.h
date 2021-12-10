@@ -177,13 +177,14 @@ class ELFCodeLoader2 final : public FEXCore::CodeLoader {
     return LoadBase;
   }
 
-  std::string ResolveRootfsFile(std::string File, std::string RootFS) {
+  std::string ResolveRootfsFile(std::string File, const std::string& RootFS) {
     // If the path is relative then just run that
-    if (std::filesystem::path(File).is_relative()) {
+    auto file_path = std::filesystem::path(std::move(File));
+    if (file_path.is_relative()) {
       return File;
     }
 
-    std::string RootFSLink = RootFS + File;
+    auto RootFSLink = RootFS / std::move(file_path);
 
     while (std::filesystem::is_symlink(RootFSLink)) {
       // Do some special handling if the RootFS's linker is a symlink
@@ -191,7 +192,7 @@ class ELFCodeLoader2 final : public FEXCore::CodeLoader {
       // Resolve this around back to the rootfs
       auto SymlinkTarget = std::filesystem::read_symlink(RootFSLink);
       if (SymlinkTarget.is_absolute()) {
-        RootFSLink = RootFS + SymlinkTarget.string();
+        RootFSLink = RootFS / std::move(SymlinkTarget);
       }
       else {
         break;
@@ -316,7 +317,7 @@ class ELFCodeLoader2 final : public FEXCore::CodeLoader {
   };
 
   bool MapMemory(const MapperFn& Mapper, const UnmapperFn& Unmapper) override {
-    for (auto Header: MainElf.phdrs) {
+    for (const auto& Header: MainElf.phdrs) {
       if (Header.p_type == PT_GNU_STACK) {
         if (Header.p_flags & PF_X)
           ExecutableStack = true;
