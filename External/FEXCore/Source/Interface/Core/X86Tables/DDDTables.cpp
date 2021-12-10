@@ -47,9 +47,7 @@ using namespace InstFlags;
     {0xB7, 1, X86InstInfo{"PMULHRW",  TYPE_3DNOW_INST, FLAGS_MODRM, 0, nullptr}},
   }};
 
-constinit std::array<X86InstInfo, MAX_3DNOW_TABLE_SIZE> DDDNowOps = []() constexpr {
-  return X86TableBuilder::GenerateInitTable<MAX_3DNOW_TABLE_SIZE>(DDDNowOpTable);
-}();
+constinit auto DDDNowOps = X86TableBuilder::GenerateInitTable<MAX_3DNOW_TABLE_SIZE>(DDDNowOpTable);
 
 UPDATE_STATIC_DEBUG_STATS(DDDNowOpTable.count);
 

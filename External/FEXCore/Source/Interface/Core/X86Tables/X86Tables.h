@@ -113,9 +113,10 @@ struct X86TableBuilder { /* TODO: Remove struct? */
         if (Info.Type == TYPE_COPY_OTHER) {
           FinalTable[OpNum + i] = OtherLocal[OpNum + i];
         }
-        else {
-          FinalTable[OpNum + i] = Info;
-        }
+        // Assume other ops have been initialized statically already ... TODO: Should have a parameter for this instead
+//        else {
+//          FinalTable[OpNum + i] = Info;
+//        }
       }
     }
   }
@@ -181,6 +182,10 @@ private:
   static constexpr void GenerateTable(X86InstInfo* FinalTable, X86TablesInfoStruct<OpcodeType> const * const LocalTable, size_t TableSize) {
     for (size_t j = 0; j < TableSize; ++j) {
       X86TablesInfoStruct<OpcodeType> const &Op = LocalTable[j];
+      if (Op.Info.Type == TYPE_COPY_OTHER) {
+        // Must be patched in at runtime with PatchTableWithCopy
+        continue;
+      }
       std::fill_n(&FinalTable[Op.first], Op.second, Op.Info);
     }
   };

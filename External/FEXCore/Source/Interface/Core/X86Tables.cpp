@@ -10,10 +10,6 @@ $end_info$
 
 namespace FEXCore::X86Tables {
 
-std::array<X86InstInfo, MAX_REP_MOD_TABLE_SIZE> RepModOps{};
-std::array<X86InstInfo, MAX_REPNE_MOD_TABLE_SIZE> RepNEModOps{};
-std::array<X86InstInfo, MAX_OPSIZE_MOD_TABLE_SIZE> OpSizeModOps{};
-
 void InitializeBaseTables(Context::OperatingMode Mode);
 void InitializeSecondaryTables(Context::OperatingMode Mode);
 void InitializePrimaryGroupTables(Context::OperatingMode Mode);

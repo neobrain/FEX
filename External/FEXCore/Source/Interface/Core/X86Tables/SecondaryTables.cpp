@@ -581,15 +581,15 @@ using namespace InstFlags;
     {0xFF, 1, X86InstInfo{"",           TYPE_COPY_OTHER, FLAGS_NONE,                                                            0, nullptr}},
   }};
 
-constinit auto SecondBaseOps =
-  X86TableBuilder::GenerateInitTable<MAX_SECOND_TABLE_SIZE>(TwoByteOpTable);
+constinit auto SecondBaseOps = X86TableBuilder::GenerateInitTable<MAX_SECOND_TABLE_SIZE>(TwoByteOpTable);
+
+constinit auto RepModOps = X86TableBuilder::GenerateInitTable<MAX_REP_MOD_TABLE_SIZE>(RepModOpTable);
+constinit auto RepNEModOps = X86TableBuilder::GenerateInitTable<MAX_REPNE_MOD_TABLE_SIZE>(RepNEModOpTable);
+constinit auto OpSizeModOps = X86TableBuilder::GenerateInitTable<MAX_OPSIZE_MOD_TABLE_SIZE>(OpSizeModOpTable);
+
+UPDATE_STATIC_DEBUG_STATS(TwoByteOpTable.count + RepModOpTable.count + RepNEModOpTable.count + OpSizeModOpTable.count);
 
 void InitializeSecondaryTables(Context::OperatingMode Mode) {
-  DebugStats += TwoByteOpTable.count;
-  DebugStats += RepModOpTable.count;
-  DebugStats += RepNEModOpTable.count;
-  DebugStats += OpSizeModOpTable.count;
-
   if (Mode == Context::MODE_64BIT) {
     DebugStats += TwoByteOpTable_64.count;
     X86TableBuilder::PatchTable(SecondBaseOps, TwoByteOpTable_64);
