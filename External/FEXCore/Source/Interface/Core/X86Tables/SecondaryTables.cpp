@@ -14,8 +14,7 @@ $end_info$
 namespace FEXCore::X86Tables {
 using namespace InstFlags;
 
-void InitializeSecondaryTables(Context::OperatingMode Mode) {
-  static constexpr U8U8InfoStruct TwoByteOpTable[] = {
+  constexpr U8U8InfoStruct TwoByteOpTable[] = {
     // Instructions
     {0x00, 1, X86InstInfo{"",           TYPE_GROUP_6, FLAGS_MODRM | FLAGS_NO_OVERLAY,                                                                                 0, nullptr}},
     {0x01, 1, X86InstInfo{"",           TYPE_GROUP_7, FLAGS_NO_OVERLAY,                                                                                 0, nullptr}},
@@ -266,7 +265,7 @@ void InitializeSecondaryTables(Context::OperatingMode Mode) {
     {0x3F, 1, X86InstInfo{"ALTINST",      TYPE_INST, FLAGS_BLOCK_END | FLAGS_NO_OVERLAY | FLAGS_SETS_RIP,                                                            0, nullptr}},
   };
 
-  static constexpr U8U8InfoStruct TwoByteOpTable_32[] = {
+  constexpr U8U8InfoStruct TwoByteOpTable_32[] = {
     {0xA0, 1, X86InstInfo{"PUSH FS", TYPE_INST, GenFlagsSrcSize(SIZE_16BIT) | FLAGS_DEBUG_MEM_ACCESS | FLAGS_NO_OVERLAY,                                                                               0, nullptr}},
     {0xA1, 1, X86InstInfo{"POP FS",  TYPE_INST, GenFlagsSizes(SIZE_16BIT, SIZE_DEF) | FLAGS_DEBUG_MEM_ACCESS | FLAGS_NO_OVERLAY,                                                                               0, nullptr}},
 
@@ -274,7 +273,7 @@ void InitializeSecondaryTables(Context::OperatingMode Mode) {
     {0xA9, 1, X86InstInfo{"POP GS",  TYPE_INST, GenFlagsSizes(SIZE_16BIT, SIZE_DEF) | FLAGS_DEBUG_MEM_ACCESS | FLAGS_NO_OVERLAY,                                                                               0, nullptr}},
   };
 
-  static constexpr U8U8InfoStruct TwoByteOpTable_64[] = {
+  constexpr U8U8InfoStruct TwoByteOpTable_64[] = {
     {0xA0, 1, X86InstInfo{"PUSH FS", TYPE_INST, GenFlagsSameSize(SIZE_64BIT) | FLAGS_DEBUG_MEM_ACCESS | FLAGS_NO_OVERLAY,                                                0, nullptr}},
     {0xA1, 1, X86InstInfo{"POP FS",  TYPE_INST, GenFlagsSizes(SIZE_16BIT, SIZE_64BIT) | FLAGS_DEBUG_MEM_ACCESS | FLAGS_NO_OVERLAY,                                                0, nullptr}},
 
@@ -282,7 +281,7 @@ void InitializeSecondaryTables(Context::OperatingMode Mode) {
     {0xA9, 1, X86InstInfo{"POP GS",  TYPE_INST, GenFlagsSizes(SIZE_16BIT, SIZE_64BIT) | FLAGS_DEBUG_MEM_ACCESS | FLAGS_NO_OVERLAY,                                                0, nullptr}},
   };
 
-  static constexpr U8U8InfoStruct RepModOpTable[] = {
+  constexpr U8U8InfoStruct RepModOpTable[] = {
     {0x0, 16, X86InstInfo{"",          TYPE_COPY_OTHER, FLAGS_NONE,                                     0, nullptr}},
 
     {0x10, 1, X86InstInfo{"MOVSS",     TYPE_INST, GenFlagsSameSize(SIZE_128BIT) | FLAGS_MODRM | FLAGS_XMM_FLAGS,                    0, nullptr}},
@@ -362,7 +361,7 @@ void InitializeSecondaryTables(Context::OperatingMode Mode) {
     {0xFF, 1, X86InstInfo{"",          TYPE_COPY_OTHER, FLAGS_NONE,                                     0, nullptr}},
   };
 
-  static constexpr U8U8InfoStruct RepNEModOpTable[] = {
+  constexpr U8U8InfoStruct RepNEModOpTable[] = {
     {0x0, 16, X86InstInfo{"",           TYPE_COPY_OTHER, FLAGS_NONE,                                                     0, nullptr}},
 
     {0x10, 1, X86InstInfo{"MOVSD",      TYPE_INST, GenFlagsSameSize(SIZE_128BIT) | FLAGS_MODRM | FLAGS_XMM_FLAGS,                  0, nullptr}},
@@ -435,7 +434,7 @@ void InitializeSecondaryTables(Context::OperatingMode Mode) {
     {0xF8, 8, X86InstInfo{"",          TYPE_INVALID, FLAGS_NONE,                                                         0, nullptr}},
   };
 
-  static constexpr U8U8InfoStruct OpSizeModOpTable[] = {
+  constexpr U8U8InfoStruct OpSizeModOpTable[] = {
     {0x0, 16, X86InstInfo{"",           TYPE_COPY_OTHER, FLAGS_NONE,                                                            0, nullptr}},
 
     {0x10, 1, X86InstInfo{"MOVUPD",     TYPE_INST, GenFlagsSameSize(SIZE_128BIT) | FLAGS_MODRM | FLAGS_XMM_FLAGS,                         0, nullptr}},
@@ -582,19 +581,21 @@ void InitializeSecondaryTables(Context::OperatingMode Mode) {
     {0xFF, 1, X86InstInfo{"",           TYPE_COPY_OTHER, FLAGS_NONE,                                                            0, nullptr}},
   };
 
-  GenerateTable(&SecondBaseOps.at(0), TwoByteOpTable, std::size(TwoByteOpTable));
+constinit std::array<X86InstInfo, MAX_SECOND_TABLE_SIZE> SecondBaseOps =
+  X86TableBuilder::GenerateInitTable<MAX_SECOND_TABLE_SIZE>(TwoByteOpTable);
 
+
+void InitializeSecondaryTables(Context::OperatingMode Mode) {
   if (Mode == Context::MODE_64BIT) {
-    GenerateTable(&SecondBaseOps.at(0), TwoByteOpTable_64, std::size(TwoByteOpTable_64));
+    X86TableBuilder{}.GenerateTable(SecondBaseOps.data(), TwoByteOpTable_64, std::size(TwoByteOpTable_64));
   }
   else {
-    GenerateTable(&SecondBaseOps.at(0), TwoByteOpTable_32, std::size(TwoByteOpTable_32));
+    X86TableBuilder{}.GenerateTable(SecondBaseOps.data(), TwoByteOpTable_32, std::size(TwoByteOpTable_32));
   }
 
-  GenerateTableWithCopy(&RepModOps.at(0), RepModOpTable, std::size(RepModOpTable), &SecondBaseOps.at(0));
-  GenerateTableWithCopy(&RepNEModOps.at(0), RepNEModOpTable,   std::size(RepNEModOpTable), &SecondBaseOps.at(0));
-  GenerateTableWithCopy(&OpSizeModOps.at(0), OpSizeModOpTable, std::size(OpSizeModOpTable), &SecondBaseOps.at(0));
+  GenerateTableWithCopy(RepModOps.data(), RepModOpTable, std::size(RepModOpTable), SecondBaseOps.data());
+  GenerateTableWithCopy(RepNEModOps.data(), RepNEModOpTable,   std::size(RepNEModOpTable), SecondBaseOps.data());
+  GenerateTableWithCopy(OpSizeModOps.data(), OpSizeModOpTable, std::size(OpSizeModOpTable), SecondBaseOps.data());
 
 }
-
 }

@@ -13,14 +13,14 @@ $end_info$
 namespace FEXCore::X86Tables {
 using namespace InstFlags;
 
-void InitializeH0F38Tables() {
+std::array<X86InstInfo, MAX_0F_38_TABLE_SIZE> H0F38TableOps = []() constexpr {
 #define OPD(prefix, opcode) ((prefix << 8) | opcode)
   constexpr uint16_t PF_38_NONE = 0;
   constexpr uint16_t PF_38_66   = 1;
   constexpr uint16_t PF_38_F2   = 2;
   constexpr uint16_t PF_38_F3   = 3;
 
-  static constexpr U16U8InfoStruct H0F38Table[] = {
+  constexpr U16U8InfoStruct H0F38Table[] = {
     {OPD(PF_38_NONE, 0x00), 1, X86InstInfo{"PSHUFB",     TYPE_INST, GenFlagsSameSize(SIZE_64BIT)  | FLAGS_MODRM | FLAGS_XMM_FLAGS | FLAGS_SF_MMX, 0, nullptr}},
     {OPD(PF_38_66,   0x00), 1, X86InstInfo{"PSHUFB",     TYPE_INST, GenFlagsSameSize(SIZE_128BIT) | FLAGS_MODRM | FLAGS_XMM_FLAGS, 0, nullptr}},
     {OPD(PF_38_NONE, 0x01), 1, X86InstInfo{"PHADDW",     TYPE_INST, GenFlagsSameSize(SIZE_64BIT)  | FLAGS_MODRM | FLAGS_XMM_FLAGS | FLAGS_SF_MMX, 0, nullptr}},
@@ -106,6 +106,7 @@ void InitializeH0F38Tables() {
   };
 #undef OPD
 
-  GenerateTable(&H0F38TableOps.at(0), H0F38Table, std::size(H0F38Table));
-}
+  return X86TableBuilder::GenerateInitTable<MAX_0F_38_TABLE_SIZE>(H0F38Table);
+}();
+
 }

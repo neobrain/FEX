@@ -13,8 +13,8 @@ $end_info$
 namespace FEXCore::X86Tables {
 using namespace InstFlags;
 
-void InitializeDDDTables() {
-  static constexpr U8U8InfoStruct DDDNowOpTable[] = {
+constinit std::array<X86InstInfo, MAX_3DNOW_TABLE_SIZE> DDDNowOps = []() constexpr {
+  constexpr U8U8InfoStruct DDDNowOpTable[] = {
     {0x0C, 1, X86InstInfo{"PI2FW",    TYPE_3DNOW_INST, FLAGS_MODRM, 0, nullptr}},
     {0x0D, 1, X86InstInfo{"PI2FD",    TYPE_3DNOW_INST, FLAGS_MODRM, 0, nullptr}},
     {0x1C, 1, X86InstInfo{"PF2IW",    TYPE_3DNOW_INST, FLAGS_MODRM, 0, nullptr}},
@@ -48,6 +48,7 @@ void InitializeDDDTables() {
     {0xB7, 1, X86InstInfo{"PMULHRW",  TYPE_3DNOW_INST, FLAGS_MODRM, 0, nullptr}},
   };
 
-  GenerateTable(&DDDNowOps.at(0), DDDNowOpTable, std::size(DDDNowOpTable));
-}
+  return X86TableBuilder::GenerateInitTable<MAX_3DNOW_TABLE_SIZE>(DDDNowOpTable);
+}();
+
 }

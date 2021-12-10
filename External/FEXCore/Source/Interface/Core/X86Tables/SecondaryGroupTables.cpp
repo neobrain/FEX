@@ -14,14 +14,14 @@ $end_info$
 namespace FEXCore::X86Tables {
 using namespace InstFlags;
 
-void InitializeSecondaryGroupTables() {
+constinit std::array<X86InstInfo, MAX_INST_SECOND_GROUP_TABLE_SIZE> SecondInstGroupOps = []() constexpr {
 #define OPD(group, prefix, Reg) (((group - FEXCore::X86Tables::TYPE_GROUP_6) << 5) | (prefix) << 3 | (Reg))
   constexpr uint16_t PF_NONE = 0;
   constexpr uint16_t PF_F3   = 1;
   constexpr uint16_t PF_66   = 2;
   constexpr uint16_t PF_F2   = 3;
 
-  static constexpr U16U8InfoStruct SecondaryExtensionOpTable[] = {
+  constexpr U16U8InfoStruct SecondaryExtensionOpTable[] = {
     // GROUP 1
     // GROUP 2
     // GROUP 3
@@ -488,7 +488,7 @@ void InitializeSecondaryGroupTables() {
   };
 #undef OPD
 
-  GenerateTable(&SecondInstGroupOps.at(0), SecondaryExtensionOpTable, std::size(SecondaryExtensionOpTable));
-}
+  return X86TableBuilder::GenerateInitTable<MAX_INST_SECOND_GROUP_TABLE_SIZE>(SecondaryExtensionOpTable);
+}();
 
 }

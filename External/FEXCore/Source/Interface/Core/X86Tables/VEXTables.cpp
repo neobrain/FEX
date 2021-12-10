@@ -12,7 +12,6 @@ $end_info$
 namespace FEXCore::X86Tables {
 using namespace InstFlags;
 
-void InitializeVEXTables() {
 #define OPD(map_select, pp, opcode) (((map_select - 1) << 10) | (pp << 8) | (opcode))
   static constexpr U16U8InfoStruct VEXTable[] = {
     // Map 0 (Reserved)
@@ -510,7 +509,8 @@ void InitializeVEXTables() {
   };
 #undef OPD
 
-  GenerateTable(&VEXTableOps.at(0), VEXTable, std::size(VEXTable));
-  GenerateTable(&VEXTableGroupOps.at(0), VEXGroupTable, std::size(VEXGroupTable));
-}
+constinit auto VEXTableOps = X86TableBuilder::GenerateInitTable<MAX_VEX_TABLE_SIZE>(VEXTable);
+
+constinit auto VEXTableGroupOps = X86TableBuilder::GenerateInitTable<MAX_VEX_GROUP_TABLE_SIZE>(VEXGroupTable);
+
 }

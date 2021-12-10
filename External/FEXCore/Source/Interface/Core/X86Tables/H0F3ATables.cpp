@@ -15,7 +15,6 @@ $end_info$
 namespace FEXCore::X86Tables {
 using namespace InstFlags;
 
-void InitializeH0F3ATables(Context::OperatingMode Mode) {
 #define OPD(REX, prefix, opcode) ((REX << 9) | (prefix << 8) | opcode)
   constexpr uint16_t PF_3A_NONE = 0;
   constexpr uint16_t PF_3A_66   = 1;
@@ -60,10 +59,11 @@ void InitializeH0F3ATables(Context::OperatingMode Mode) {
 
 #undef OPD
 
-  GenerateTable(&H0F3ATableOps.at(0), H0F3ATable, std::size(H0F3ATable));
+constinit auto H0F3ATableOps = X86TableBuilder::GenerateInitTable<MAX_0F_3A_TABLE_SIZE>(H0F3ATable);
 
+void InitializeH0F3ATables(Context::OperatingMode Mode) {
   if (Mode == Context::MODE_64BIT) {
-    GenerateTable(&H0F3ATableOps.at(0), H0F3ATable_64, std::size(H0F3ATable_64));
+    X86TableBuilder{}.GenerateTable(H0F3ATableOps.data(), H0F3ATable_64, std::size(H0F3ATable_64));
   }
 }
 }

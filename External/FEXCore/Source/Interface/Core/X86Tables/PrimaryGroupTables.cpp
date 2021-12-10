@@ -14,9 +14,8 @@ $end_info$
 namespace FEXCore::X86Tables {
 using namespace InstFlags;
 
-void InitializePrimaryGroupTables(Context::OperatingMode Mode) {
 #define OPD(group, prefix, Reg) (((group - FEXCore::X86Tables::TYPE_GROUP_1) << 6) | (prefix) << 3 | (Reg))
-  const U16U8InfoStruct PrimaryGroupOpTable[] = {
+  constexpr U16U8InfoStruct PrimaryGroupOpTable[] = {
     // GROUP_1 | 0x80 | reg
     {OPD(TYPE_GROUP_1, OpToIndex(0x80), 0), 1, X86InstInfo{"ADD",  TYPE_INST, GenFlagsSameSize(SIZE_8BIT) | FLAGS_MODRM | FLAGS_SF_MOD_DST,                                      1, nullptr}},
     {OPD(TYPE_GROUP_1, OpToIndex(0x80), 1), 1, X86InstInfo{"OR",   TYPE_INST, GenFlagsSameSize(SIZE_8BIT) | FLAGS_MODRM | FLAGS_SF_MOD_DST,                                      1, nullptr}},
@@ -144,12 +143,12 @@ void InitializePrimaryGroupTables(Context::OperatingMode Mode) {
 
   };
 
-  const U16U8InfoStruct PrimaryGroupOpTable_64[] = {
+  constexpr U16U8InfoStruct PrimaryGroupOpTable_64[] = {
     // Invalid in 64bit mode
     {OPD(TYPE_GROUP_1, OpToIndex(0x82), 0), 8, X86InstInfo{"",     TYPE_INVALID, FLAGS_NONE,                                                        0, nullptr}},
   };
 
-  const U16U8InfoStruct PrimaryGroupOpTable_32[] = {
+  constexpr U16U8InfoStruct PrimaryGroupOpTable_32[] = {
     // Duplicates the 0x80 opcode group
     {OPD(TYPE_GROUP_1, OpToIndex(0x82), 0), 1, X86InstInfo{"ADD",  TYPE_INST, GenFlagsSameSize(SIZE_8BIT) | FLAGS_MODRM | FLAGS_SF_MOD_DST,                                      1, nullptr}},
     {OPD(TYPE_GROUP_1, OpToIndex(0x82), 1), 1, X86InstInfo{"OR",   TYPE_INST, GenFlagsSameSize(SIZE_8BIT) | FLAGS_MODRM | FLAGS_SF_MOD_DST,                                      1, nullptr}},
@@ -163,12 +162,15 @@ void InitializePrimaryGroupTables(Context::OperatingMode Mode) {
 
 #undef OPD
 
-  GenerateTable(&PrimaryInstGroupOps.at(0), PrimaryGroupOpTable, std::size(PrimaryGroupOpTable));
+constinit std::array<X86InstInfo, MAX_INST_GROUP_TABLE_SIZE> PrimaryInstGroupOps =
+  X86TableBuilder::GenerateInitTable<MAX_INST_GROUP_TABLE_SIZE>(PrimaryGroupOpTable);
+
+void InitializePrimaryGroupTables(Context::OperatingMode Mode) {
   if (Mode == Context::MODE_64BIT) {
-    GenerateTable(&PrimaryInstGroupOps.at(0), PrimaryGroupOpTable_64, std::size(PrimaryGroupOpTable_64));
+    X86TableBuilder{}.GenerateTable(PrimaryInstGroupOps.data(), PrimaryGroupOpTable_64, std::size(PrimaryGroupOpTable_64));
   }
   else {
-    GenerateTable(&PrimaryInstGroupOps.at(0), PrimaryGroupOpTable_32, std::size(PrimaryGroupOpTable_32));
+    X86TableBuilder{}.GenerateTable(PrimaryInstGroupOps.data(), PrimaryGroupOpTable_32, std::size(PrimaryGroupOpTable_32));
   }
 }
 

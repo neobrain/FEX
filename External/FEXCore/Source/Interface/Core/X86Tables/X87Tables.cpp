@@ -12,10 +12,11 @@ $end_info$
 namespace FEXCore::X86Tables {
 using namespace InstFlags;
 
-void InitializeX87Tables() {
+// TODO: This table has 2048 elements, not sure it's wise to constexpr it
+constinit std::array<X86InstInfo, MAX_X87_TABLE_SIZE> X87Ops = []() constexpr {
 #define OPD(op, modrmop) (((op - 0xD8) << 8) | modrmop)
 #define OPDReg(op, reg) (((op - 0xD8) << 8) | (reg << 3))
-  static constexpr U16U8InfoStruct X87OpTable[] = {
+  constexpr U16U8InfoStruct X87OpTable[] = {
     // 0xD8
     {OPDReg(0xD8, 0), 1, X86InstInfo{"FADD",  TYPE_X87, FLAGS_MODRM, 0, nullptr}},
     {OPDReg(0xD8, 1), 1, X86InstInfo{"FMUL",  TYPE_X87, FLAGS_MODRM, 0, nullptr}},
@@ -263,6 +264,7 @@ void InitializeX87Tables() {
 #undef OPD
 #undef OPDReg
 
-  GenerateX87Table(&X87Ops.at(0), X87OpTable, std::size(X87OpTable));
-}
+  return X86TableBuilder::GenerateX87Table<MAX_X87_TABLE_SIZE>(X87OpTable);
+}();
+
 }

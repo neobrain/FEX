@@ -13,8 +13,8 @@ $end_info$
 namespace FEXCore::X86Tables {
 using namespace InstFlags;
 
-void InitializeEVEXTables() {
-  static constexpr U16U8InfoStruct EVEXTable[] = {
+constinit std::array<X86InstInfo, MAX_EVEX_TABLE_SIZE> EVEXTableOps = []() constexpr {
+  constexpr U16U8InfoStruct EVEXTable[] = {
     {0x10, 1, X86InstInfo{"VMOVUPS",         TYPE_INST, FLAGS_MODRM | FLAGS_XMM_FLAGS, 0, nullptr}},
     {0x11, 1, X86InstInfo{"VMOVUPS",         TYPE_INST, FLAGS_MODRM | FLAGS_SF_MOD_DST | FLAGS_XMM_FLAGS, 0, nullptr}},
     {0x18, 1, X86InstInfo{"VBROADCASTSS",    TYPE_INST, FLAGS_MODRM | FLAGS_XMM_FLAGS, 0, nullptr}},
@@ -30,6 +30,7 @@ void InitializeEVEXTables() {
     {0xE7, 1, X86InstInfo{"VMOVNTDQ",        TYPE_INST, FLAGS_MODRM | FLAGS_SF_MOD_DST | FLAGS_XMM_FLAGS, 0, nullptr}},
   };
 
-  GenerateTable(&EVEXTableOps.at(0), EVEXTable, std::size(EVEXTable));
-}
+  return X86TableBuilder::GenerateInitTable<MAX_EVEX_TABLE_SIZE>(EVEXTable);
+}();
+
 }

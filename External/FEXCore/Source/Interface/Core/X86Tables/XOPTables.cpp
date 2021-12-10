@@ -14,7 +14,6 @@ $end_info$
 namespace FEXCore::X86Tables {
 using namespace InstFlags;
 
-void InitializeXOPTables() {
 #define OPD(group, pp, opcode) ( (group << 10) | (pp << 8) | (opcode))
   constexpr uint16_t XOP_GROUP_8 = 0;
   constexpr uint16_t XOP_GROUP_9 = 1;
@@ -130,7 +129,8 @@ void InitializeXOPTables() {
   };
 #undef OPD
 
-  GenerateTable(&XOPTableOps.at(0), XOPTable, std::size(XOPTable));
-  GenerateTable(&XOPTableGroupOps.at(0), XOPGroupTable, std::size(XOPGroupTable));
-}
+constinit auto XOPTableOps = X86TableBuilder::GenerateInitTable<MAX_XOP_TABLE_SIZE>(XOPTable);
+
+constinit auto XOPTableGroupOps = X86TableBuilder::GenerateInitTable<MAX_XOP_GROUP_TABLE_SIZE>(XOPGroupTable);
+
 }
