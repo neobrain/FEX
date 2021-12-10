@@ -208,7 +208,7 @@ union SIBDecoded {
   };
 };
 
-enum InstType {
+enum InstType : uint8_t {
   TYPE_UNKNOWN,
   TYPE_LEGACY_PREFIX,
   TYPE_PREFIX,
@@ -428,14 +428,21 @@ void InstallDebugInfo();
 #endif
 
 struct X86InstInfo {
-  char const *Name;
-  InstType Type;
-  InstFlags::InstFlagType Flags; ///< Must be larger than InstFlags enum
-  uint8_t MoreBytes;
-  OpDispatchPtr OpcodeDispatcher;
+  constexpr X86InstInfo() = default;
+
+  constexpr X86InstInfo(char const *Name_, InstType Type_, InstFlags::InstFlagType Flags_, uint8_t MoreBytes_, OpDispatchPtr OpcodeDispatcher_) noexcept
+   : Name(Name_), Type(Type_), MoreBytes(MoreBytes_), Flags(Flags_), OpcodeDispatcher(OpcodeDispatcher_) {}
+
+  constexpr X86InstInfo(const X86InstInfo&) = default;
+
+  char const *Name {};
+  InstType Type {};
+  uint8_t MoreBytes {};
+  InstFlags::InstFlagType Flags {}; ///< Must be larger than InstFlags enum
+  OpDispatchPtr OpcodeDispatcher {};
 #ifndef NDEBUG
-  X86InstDebugInfo::Flags DebugInfo;
-  uint32_t NumUnitTestsGenerated;
+  X86InstDebugInfo::Flags DebugInfo {};
+  uint32_t NumUnitTestsGenerated = 0;
 #endif
 
   bool operator==(const X86InstInfo &b) const {
@@ -453,7 +460,7 @@ struct X86InstInfo {
   }
 };
 
-static_assert(std::is_trivial<X86InstInfo>::value, "X86InstInfo needs to be trivial");
+//static_assert(std::is_trivial<X86InstInfo>::value, "X86InstInfo needs to be trivial");
 
 constexpr size_t MAX_PRIMARY_TABLE_SIZE = 256;
 constexpr size_t MAX_SECOND_TABLE_SIZE = 256;
