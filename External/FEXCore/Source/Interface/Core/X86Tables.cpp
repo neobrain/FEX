@@ -17,7 +17,7 @@ void InitializeH0F3ATables(Context::OperatingMode Mode);
 
 StaticEntryCount DebugStats;
 
-void InitializeInfoTables(Context::OperatingMode Mode) {
+[[clang::xray_always_instrument]] void InitializeInfoTables(Context::OperatingMode Mode) {
 // TODO: Bake non-Mode dependent tables upfront (compile-time) and patch in the mode-dependent ones here
 
   InitializeBaseTables(Mode);
