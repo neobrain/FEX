@@ -14,7 +14,7 @@ $end_info$
 namespace FEXCore::X86Tables {
 using namespace InstFlags;
 
-  constexpr U8U8InfoStruct BaseOpTable[] = {
+  constexpr U8U8InfoStructTable BaseOpTable = {{
     // Prefixes
     // Operand size overide
     {0x66, 1, X86InstInfo{"",      TYPE_PREFIX, FLAGS_NONE,        0, nullptr}},
@@ -231,9 +231,9 @@ using namespace InstFlags;
 
     // VEX table
     {0xC4, 2, X86InstInfo{"",   TYPE_VEX_TABLE_PREFIX, FLAGS_NONE, 0, nullptr}},
-  };
+  }};
 
-  constexpr U8U8InfoStruct BaseOpTable_64[] = {
+  constexpr U8U8InfoStructTable BaseOpTable_64 = {{
     {0x06, 2, X86InstInfo{"[INV]",  TYPE_INVALID, FLAGS_NONE,                                                                     0, nullptr}},
     {0x0E, 1, X86InstInfo{"[INV]",  TYPE_INVALID, FLAGS_NONE,                                                                     0, nullptr}},
     {0x16, 2, X86InstInfo{"[INV]",  TYPE_INVALID, FLAGS_NONE,                                                                     0, nullptr}},
@@ -255,9 +255,9 @@ using namespace InstFlags;
     {0xCE, 1, X86InstInfo{"[INV]",  TYPE_INVALID, FLAGS_NONE,                                                                                    0, nullptr}},
     {0xD4, 2, X86InstInfo{"[INV]",  TYPE_INVALID, FLAGS_NONE,                                                                                    0, nullptr}},
     {0xEA, 1, X86InstInfo{"[INV]",  TYPE_INVALID, FLAGS_NONE,                                                                                                      0, nullptr}},
-  };
+  }};
 
-  constexpr U8U8InfoStruct BaseOpTable_32[] = {
+  constexpr U8U8InfoStructTable BaseOpTable_32 = {{
     {0x06, 1, X86InstInfo{"PUSH ES",  TYPE_INST, GenFlagsSrcSize(SIZE_16BIT) | FLAGS_DEBUG_MEM_ACCESS,            0, nullptr}},
     {0x07, 1, X86InstInfo{"POP ES",   TYPE_INST, GenFlagsSizes(SIZE_16BIT, SIZE_DEF) | FLAGS_DEBUG_MEM_ACCESS,    0, nullptr}},
     {0x0E, 1, X86InstInfo{"PUSH CS",  TYPE_INST, GenFlagsSrcSize(SIZE_16BIT) | FLAGS_DEBUG_MEM_ACCESS,            0, nullptr}},
@@ -285,17 +285,20 @@ using namespace InstFlags;
     {0xD4, 1, X86InstInfo{"AAM",    TYPE_INST, FLAGS_NONE,                                                        1, nullptr}},
     {0xD5, 1, X86InstInfo{"AAD",    TYPE_INST, FLAGS_NONE,                                                        1, nullptr}},
     {0xEA, 1, X86InstInfo{"JMPF",   TYPE_INST, FLAGS_NONE,                                                        0, nullptr}},
-  };
+  }};
 
 
-constinit std::array<X86InstInfo, MAX_PRIMARY_TABLE_SIZE> BaseOps =
-  X86TableBuilder::GenerateInitTable<MAX_PRIMARY_TABLE_SIZE>(BaseOpTable);
+constinit auto BaseOps = X86TableBuilder::GenerateInitTable<MAX_PRIMARY_TABLE_SIZE>(BaseOpTable);
+
+UPDATE_STATIC_DEBUG_STATS(BaseOpTable.count);
 
 void InitializeBaseTables(Context::OperatingMode Mode) {
   if (Mode == Context::MODE_64BIT) {
-    X86TableBuilder{}.GenerateTable(BaseOps.data(), BaseOpTable_64, std::size(BaseOpTable_64));
+    DebugStats += BaseOpTable_64.count;
+    X86TableBuilder::PatchTable(BaseOps, BaseOpTable_64);
   } else {
-    X86TableBuilder{}.GenerateTable(BaseOps.data(), BaseOpTable_32, std::size(BaseOpTable_32));
+    DebugStats += BaseOpTable_32.count;
+    X86TableBuilder::PatchTable(BaseOps, BaseOpTable_32);
   }
 }
 }

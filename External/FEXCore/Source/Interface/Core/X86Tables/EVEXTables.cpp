@@ -13,8 +13,7 @@ $end_info$
 namespace FEXCore::X86Tables {
 using namespace InstFlags;
 
-constinit std::array<X86InstInfo, MAX_EVEX_TABLE_SIZE> EVEXTableOps = []() constexpr {
-  constexpr U16U8InfoStruct EVEXTable[] = {
+  constexpr U16U8InfoStructTable EVEXTable = {{
     {0x10, 1, X86InstInfo{"VMOVUPS",         TYPE_INST, FLAGS_MODRM | FLAGS_XMM_FLAGS, 0, nullptr}},
     {0x11, 1, X86InstInfo{"VMOVUPS",         TYPE_INST, FLAGS_MODRM | FLAGS_SF_MOD_DST | FLAGS_XMM_FLAGS, 0, nullptr}},
     {0x18, 1, X86InstInfo{"VBROADCASTSS",    TYPE_INST, FLAGS_MODRM | FLAGS_XMM_FLAGS, 0, nullptr}},
@@ -28,9 +27,10 @@ constinit std::array<X86InstInfo, MAX_EVEX_TABLE_SIZE> EVEXTableOps = []() const
     {0x73, 1, X86InstInfo{"VPSLLDQ",         TYPE_INST, FLAGS_MODRM | FLAGS_SF_MOD_DST | FLAGS_XMM_FLAGS, 0, nullptr}},
     {0x7F, 1, X86InstInfo{"VMOVDQU64",       TYPE_INST, FLAGS_MODRM | FLAGS_SF_MOD_DST | FLAGS_XMM_FLAGS, 0, nullptr}},
     {0xE7, 1, X86InstInfo{"VMOVNTDQ",        TYPE_INST, FLAGS_MODRM | FLAGS_SF_MOD_DST | FLAGS_XMM_FLAGS, 0, nullptr}},
-  };
+  }};
 
-  return X86TableBuilder::GenerateInitTable<MAX_EVEX_TABLE_SIZE>(EVEXTable);
-}();
+constinit auto EVEXTableOps = X86TableBuilder::GenerateInitTable<MAX_EVEX_TABLE_SIZE>(EVEXTable);
+
+UPDATE_STATIC_DEBUG_STATS(EVEXTable.count);
 
 }

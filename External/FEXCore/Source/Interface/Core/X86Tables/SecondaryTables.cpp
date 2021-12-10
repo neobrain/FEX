@@ -14,7 +14,7 @@ $end_info$
 namespace FEXCore::X86Tables {
 using namespace InstFlags;
 
-  constexpr U8U8InfoStruct TwoByteOpTable[] = {
+  constexpr U8U8InfoStructTable TwoByteOpTable = {{
     // Instructions
     {0x00, 1, X86InstInfo{"",           TYPE_GROUP_6, FLAGS_MODRM | FLAGS_NO_OVERLAY,                                                                                 0, nullptr}},
     {0x01, 1, X86InstInfo{"",           TYPE_GROUP_7, FLAGS_NO_OVERLAY,                                                                                 0, nullptr}},
@@ -263,25 +263,25 @@ using namespace InstFlags;
 
     // This was originally used by VIA to jump to its alternative instruction set. Used for OP_THUNK
     {0x3F, 1, X86InstInfo{"ALTINST",      TYPE_INST, FLAGS_BLOCK_END | FLAGS_NO_OVERLAY | FLAGS_SETS_RIP,                                                            0, nullptr}},
-  };
+  }};
 
-  constexpr U8U8InfoStruct TwoByteOpTable_32[] = {
+  constexpr U8U8InfoStructTable TwoByteOpTable_32 = {{
     {0xA0, 1, X86InstInfo{"PUSH FS", TYPE_INST, GenFlagsSrcSize(SIZE_16BIT) | FLAGS_DEBUG_MEM_ACCESS | FLAGS_NO_OVERLAY,                                                                               0, nullptr}},
     {0xA1, 1, X86InstInfo{"POP FS",  TYPE_INST, GenFlagsSizes(SIZE_16BIT, SIZE_DEF) | FLAGS_DEBUG_MEM_ACCESS | FLAGS_NO_OVERLAY,                                                                               0, nullptr}},
 
     {0xA8, 1, X86InstInfo{"PUSH GS", TYPE_INST, GenFlagsSrcSize(SIZE_16BIT) | FLAGS_DEBUG_MEM_ACCESS | FLAGS_NO_OVERLAY,                                                                               0, nullptr}},
     {0xA9, 1, X86InstInfo{"POP GS",  TYPE_INST, GenFlagsSizes(SIZE_16BIT, SIZE_DEF) | FLAGS_DEBUG_MEM_ACCESS | FLAGS_NO_OVERLAY,                                                                               0, nullptr}},
-  };
+  }};
 
-  constexpr U8U8InfoStruct TwoByteOpTable_64[] = {
+  constexpr U8U8InfoStructTable TwoByteOpTable_64 = {{
     {0xA0, 1, X86InstInfo{"PUSH FS", TYPE_INST, GenFlagsSameSize(SIZE_64BIT) | FLAGS_DEBUG_MEM_ACCESS | FLAGS_NO_OVERLAY,                                                0, nullptr}},
     {0xA1, 1, X86InstInfo{"POP FS",  TYPE_INST, GenFlagsSizes(SIZE_16BIT, SIZE_64BIT) | FLAGS_DEBUG_MEM_ACCESS | FLAGS_NO_OVERLAY,                                                0, nullptr}},
 
     {0xA8, 1, X86InstInfo{"PUSH GS", TYPE_INST, GenFlagsSameSize(SIZE_64BIT) | FLAGS_DEBUG_MEM_ACCESS | FLAGS_NO_OVERLAY,                                                0, nullptr}},
     {0xA9, 1, X86InstInfo{"POP GS",  TYPE_INST, GenFlagsSizes(SIZE_16BIT, SIZE_64BIT) | FLAGS_DEBUG_MEM_ACCESS | FLAGS_NO_OVERLAY,                                                0, nullptr}},
-  };
+  }};
 
-  constexpr U8U8InfoStruct RepModOpTable[] = {
+  constexpr U8U8InfoStructTable RepModOpTable = {{
     {0x0, 16, X86InstInfo{"",          TYPE_COPY_OTHER, FLAGS_NONE,                                     0, nullptr}},
 
     {0x10, 1, X86InstInfo{"MOVSS",     TYPE_INST, GenFlagsSameSize(SIZE_128BIT) | FLAGS_MODRM | FLAGS_XMM_FLAGS,                    0, nullptr}},
@@ -359,9 +359,9 @@ using namespace InstFlags;
     {0xF0, 8, X86InstInfo{"",          TYPE_INVALID, FLAGS_NONE,                                        0, nullptr}},
     {0xF8, 7, X86InstInfo{"",          TYPE_INVALID, FLAGS_NONE,                                        0, nullptr}},
     {0xFF, 1, X86InstInfo{"",          TYPE_COPY_OTHER, FLAGS_NONE,                                     0, nullptr}},
-  };
+  }};
 
-  constexpr U8U8InfoStruct RepNEModOpTable[] = {
+  constexpr U8U8InfoStructTable RepNEModOpTable = {{
     {0x0, 16, X86InstInfo{"",           TYPE_COPY_OTHER, FLAGS_NONE,                                                     0, nullptr}},
 
     {0x10, 1, X86InstInfo{"MOVSD",      TYPE_INST, GenFlagsSameSize(SIZE_128BIT) | FLAGS_MODRM | FLAGS_XMM_FLAGS,                  0, nullptr}},
@@ -432,9 +432,9 @@ using namespace InstFlags;
     {0xF0, 1, X86InstInfo{"LDDQU",     TYPE_INST, GenFlagsSameSize(SIZE_128BIT) | FLAGS_MODRM | FLAGS_SF_MOD_MEM_ONLY | FLAGS_XMM_FLAGS,0, nullptr}},
     {0xF1, 7, X86InstInfo{"",          TYPE_INVALID, FLAGS_NONE,                                                         0, nullptr}},
     {0xF8, 8, X86InstInfo{"",          TYPE_INVALID, FLAGS_NONE,                                                         0, nullptr}},
-  };
+  }};
 
-  constexpr U8U8InfoStruct OpSizeModOpTable[] = {
+  constexpr U8U8InfoStructTable OpSizeModOpTable = {{
     {0x0, 16, X86InstInfo{"",           TYPE_COPY_OTHER, FLAGS_NONE,                                                            0, nullptr}},
 
     {0x10, 1, X86InstInfo{"MOVUPD",     TYPE_INST, GenFlagsSameSize(SIZE_128BIT) | FLAGS_MODRM | FLAGS_XMM_FLAGS,                         0, nullptr}},
@@ -579,23 +579,29 @@ using namespace InstFlags;
     {0xFD, 1, X86InstInfo{"PADDW",      TYPE_INST, GenFlagsSameSize(SIZE_128BIT) | FLAGS_MODRM | FLAGS_XMM_FLAGS,                         0, nullptr}},
     {0xFE, 1, X86InstInfo{"PADDD",      TYPE_INST, GenFlagsSameSize(SIZE_128BIT) | FLAGS_MODRM | FLAGS_XMM_FLAGS,       0, nullptr}},
     {0xFF, 1, X86InstInfo{"",           TYPE_COPY_OTHER, FLAGS_NONE,                                                            0, nullptr}},
-  };
+  }};
 
-constinit std::array<X86InstInfo, MAX_SECOND_TABLE_SIZE> SecondBaseOps =
+constinit auto SecondBaseOps =
   X86TableBuilder::GenerateInitTable<MAX_SECOND_TABLE_SIZE>(TwoByteOpTable);
 
-
 void InitializeSecondaryTables(Context::OperatingMode Mode) {
+  DebugStats += TwoByteOpTable.count;
+  DebugStats += RepModOpTable.count;
+  DebugStats += RepNEModOpTable.count;
+  DebugStats += OpSizeModOpTable.count;
+
   if (Mode == Context::MODE_64BIT) {
-    X86TableBuilder{}.GenerateTable(SecondBaseOps.data(), TwoByteOpTable_64, std::size(TwoByteOpTable_64));
+    DebugStats += TwoByteOpTable_64.count;
+    X86TableBuilder::PatchTable(SecondBaseOps, TwoByteOpTable_64);
   }
   else {
-    X86TableBuilder{}.GenerateTable(SecondBaseOps.data(), TwoByteOpTable_32, std::size(TwoByteOpTable_32));
+    DebugStats += TwoByteOpTable_32.count;
+    X86TableBuilder::PatchTable(SecondBaseOps, TwoByteOpTable_32);
   }
 
-  GenerateTableWithCopy(RepModOps.data(), RepModOpTable, std::size(RepModOpTable), SecondBaseOps.data());
-  GenerateTableWithCopy(RepNEModOps.data(), RepNEModOpTable,   std::size(RepNEModOpTable), SecondBaseOps.data());
-  GenerateTableWithCopy(OpSizeModOps.data(), OpSizeModOpTable, std::size(OpSizeModOpTable), SecondBaseOps.data());
+  X86TableBuilder::PatchTableWithCopy(RepModOps, RepModOpTable, SecondBaseOps.data());
+  X86TableBuilder::PatchTableWithCopy(RepNEModOps, RepNEModOpTable, SecondBaseOps.data());
+  X86TableBuilder::PatchTableWithCopy(OpSizeModOps, OpSizeModOpTable, SecondBaseOps.data());
 
 }
 }

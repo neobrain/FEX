@@ -14,14 +14,13 @@ $end_info$
 namespace FEXCore::X86Tables {
 using namespace InstFlags;
 
-constinit std::array<X86InstInfo, MAX_INST_SECOND_GROUP_TABLE_SIZE> SecondInstGroupOps = []() constexpr {
 #define OPD(group, prefix, Reg) (((group - FEXCore::X86Tables::TYPE_GROUP_6) << 5) | (prefix) << 3 | (Reg))
   constexpr uint16_t PF_NONE = 0;
   constexpr uint16_t PF_F3   = 1;
   constexpr uint16_t PF_66   = 2;
   constexpr uint16_t PF_F2   = 3;
 
-  constexpr U16U8InfoStruct SecondaryExtensionOpTable[] = {
+  constexpr U16U8InfoStructTable SecondaryExtensionOpTable = {{
     // GROUP 1
     // GROUP 2
     // GROUP 3
@@ -485,10 +484,11 @@ constinit std::array<X86InstInfo, MAX_INST_SECOND_GROUP_TABLE_SIZE> SecondInstGr
     {OPD(TYPE_GROUP_P, PF_F2, 5), 1, X86InstInfo{"PREFETCH Res", TYPE_INST, FLAGS_MODRM | FLAGS_SF_MOD_MEM_ONLY,   0, nullptr}},
     {OPD(TYPE_GROUP_P, PF_F2, 6), 1, X86InstInfo{"PREFETCH Res", TYPE_INST, FLAGS_MODRM | FLAGS_SF_MOD_MEM_ONLY,   0, nullptr}},
     {OPD(TYPE_GROUP_P, PF_F2, 7), 1, X86InstInfo{"PREFETCH Res", TYPE_INST, FLAGS_MODRM | FLAGS_SF_MOD_MEM_ONLY,   0, nullptr}},
-  };
+  }};
 #undef OPD
 
-  return X86TableBuilder::GenerateInitTable<MAX_INST_SECOND_GROUP_TABLE_SIZE>(SecondaryExtensionOpTable);
-}();
+constinit auto SecondInstGroupOps = X86TableBuilder::GenerateInitTable<MAX_INST_SECOND_GROUP_TABLE_SIZE>(SecondaryExtensionOpTable);
+
+UPDATE_STATIC_DEBUG_STATS(SecondaryExtensionOpTable.count);
 
 }

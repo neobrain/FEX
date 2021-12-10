@@ -15,7 +15,7 @@ namespace FEXCore::X86Tables {
 using namespace InstFlags;
 
 #define OPD(group, prefix, Reg) (((group - FEXCore::X86Tables::TYPE_GROUP_1) << 6) | (prefix) << 3 | (Reg))
-  constexpr U16U8InfoStruct PrimaryGroupOpTable[] = {
+  constexpr U16U8InfoStructTable PrimaryGroupOpTable = {{
     // GROUP_1 | 0x80 | reg
     {OPD(TYPE_GROUP_1, OpToIndex(0x80), 0), 1, X86InstInfo{"ADD",  TYPE_INST, GenFlagsSameSize(SIZE_8BIT) | FLAGS_MODRM | FLAGS_SF_MOD_DST,                                      1, nullptr}},
     {OPD(TYPE_GROUP_1, OpToIndex(0x80), 1), 1, X86InstInfo{"OR",   TYPE_INST, GenFlagsSameSize(SIZE_8BIT) | FLAGS_MODRM | FLAGS_SF_MOD_DST,                                      1, nullptr}},
@@ -141,14 +141,14 @@ using namespace InstFlags;
     {OPD(TYPE_GROUP_11, OpToIndex(0xC7), 1), 5, X86InstInfo{"",     TYPE_INVALID, FLAGS_NONE,                                                       0, nullptr}},
     {OPD(TYPE_GROUP_11, OpToIndex(0xC7), 7), 1, X86InstInfo{"XBEGIN", TYPE_INST, FLAGS_MODRM | FLAGS_SRC_SEXT | FLAGS_SETS_RIP | FLAGS_DISPLACE_SIZE_DIV_2,                                                       4, nullptr}},
 
-  };
+  }};
 
-  constexpr U16U8InfoStruct PrimaryGroupOpTable_64[] = {
+  constexpr U16U8InfoStructTable PrimaryGroupOpTable_64 = {{
     // Invalid in 64bit mode
     {OPD(TYPE_GROUP_1, OpToIndex(0x82), 0), 8, X86InstInfo{"",     TYPE_INVALID, FLAGS_NONE,                                                        0, nullptr}},
-  };
+  }};
 
-  constexpr U16U8InfoStruct PrimaryGroupOpTable_32[] = {
+  constexpr U16U8InfoStructTable PrimaryGroupOpTable_32 = {{
     // Duplicates the 0x80 opcode group
     {OPD(TYPE_GROUP_1, OpToIndex(0x82), 0), 1, X86InstInfo{"ADD",  TYPE_INST, GenFlagsSameSize(SIZE_8BIT) | FLAGS_MODRM | FLAGS_SF_MOD_DST,                                      1, nullptr}},
     {OPD(TYPE_GROUP_1, OpToIndex(0x82), 1), 1, X86InstInfo{"OR",   TYPE_INST, GenFlagsSameSize(SIZE_8BIT) | FLAGS_MODRM | FLAGS_SF_MOD_DST,                                      1, nullptr}},
@@ -158,19 +158,21 @@ using namespace InstFlags;
     {OPD(TYPE_GROUP_1, OpToIndex(0x82), 5), 1, X86InstInfo{"SUB",  TYPE_INST, GenFlagsSameSize(SIZE_8BIT) | FLAGS_MODRM | FLAGS_SF_MOD_DST,                                      1, nullptr}},
     {OPD(TYPE_GROUP_1, OpToIndex(0x82), 6), 1, X86InstInfo{"XOR",  TYPE_INST, GenFlagsSameSize(SIZE_8BIT) | FLAGS_MODRM | FLAGS_SF_MOD_DST,                                      1, nullptr}},
     {OPD(TYPE_GROUP_1, OpToIndex(0x82), 7), 1, X86InstInfo{"CMP",  TYPE_INST, GenFlagsSameSize(SIZE_8BIT) | FLAGS_MODRM | FLAGS_SF_MOD_DST,                                      1, nullptr}},
-  };
+  }};
 
 #undef OPD
 
-constinit std::array<X86InstInfo, MAX_INST_GROUP_TABLE_SIZE> PrimaryInstGroupOps =
-  X86TableBuilder::GenerateInitTable<MAX_INST_GROUP_TABLE_SIZE>(PrimaryGroupOpTable);
+constinit auto PrimaryInstGroupOps = X86TableBuilder::GenerateInitTable<MAX_INST_GROUP_TABLE_SIZE>(PrimaryGroupOpTable);
+
+UPDATE_STATIC_DEBUG_STATS(PrimaryGroupOpTable.count);
 
 void InitializePrimaryGroupTables(Context::OperatingMode Mode) {
   if (Mode == Context::MODE_64BIT) {
-    X86TableBuilder{}.GenerateTable(PrimaryInstGroupOps.data(), PrimaryGroupOpTable_64, std::size(PrimaryGroupOpTable_64));
-  }
-  else {
-    X86TableBuilder{}.GenerateTable(PrimaryInstGroupOps.data(), PrimaryGroupOpTable_32, std::size(PrimaryGroupOpTable_32));
+    DebugStats += PrimaryGroupOpTable_64.count;
+    X86TableBuilder::PatchTable(PrimaryInstGroupOps, PrimaryGroupOpTable_64);
+  } else {
+    DebugStats += PrimaryGroupOpTable_32.count;
+    X86TableBuilder::PatchTable(PrimaryInstGroupOps, PrimaryGroupOpTable_32);
   }
 }
 

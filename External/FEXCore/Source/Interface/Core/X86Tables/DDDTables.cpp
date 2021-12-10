@@ -13,8 +13,7 @@ $end_info$
 namespace FEXCore::X86Tables {
 using namespace InstFlags;
 
-constinit std::array<X86InstInfo, MAX_3DNOW_TABLE_SIZE> DDDNowOps = []() constexpr {
-  constexpr U8U8InfoStruct DDDNowOpTable[] = {
+  constexpr U8U8InfoStructTable DDDNowOpTable = {{
     {0x0C, 1, X86InstInfo{"PI2FW",    TYPE_3DNOW_INST, FLAGS_MODRM, 0, nullptr}},
     {0x0D, 1, X86InstInfo{"PI2FD",    TYPE_3DNOW_INST, FLAGS_MODRM, 0, nullptr}},
     {0x1C, 1, X86InstInfo{"PF2IW",    TYPE_3DNOW_INST, FLAGS_MODRM, 0, nullptr}},
@@ -46,9 +45,12 @@ constinit std::array<X86InstInfo, MAX_3DNOW_TABLE_SIZE> DDDNowOps = []() constex
     {0xB4, 1, X86InstInfo{"PFMUL",    TYPE_3DNOW_INST, FLAGS_MODRM, 0, nullptr}},
     {0xB6, 1, X86InstInfo{"PFRCPIT2", TYPE_3DNOW_INST, FLAGS_MODRM, 0, nullptr}},
     {0xB7, 1, X86InstInfo{"PMULHRW",  TYPE_3DNOW_INST, FLAGS_MODRM, 0, nullptr}},
-  };
+  }};
 
+constinit std::array<X86InstInfo, MAX_3DNOW_TABLE_SIZE> DDDNowOps = []() constexpr {
   return X86TableBuilder::GenerateInitTable<MAX_3DNOW_TABLE_SIZE>(DDDNowOpTable);
 }();
+
+UPDATE_STATIC_DEBUG_STATS(DDDNowOpTable.count);
 
 }

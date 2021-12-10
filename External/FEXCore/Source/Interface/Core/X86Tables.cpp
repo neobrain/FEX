@@ -19,10 +19,7 @@ void InitializeSecondaryTables(Context::OperatingMode Mode);
 void InitializePrimaryGroupTables(Context::OperatingMode Mode);
 void InitializeH0F3ATables(Context::OperatingMode Mode);
 
-#ifndef NDEBUG
-uint64_t Total{};
-uint64_t NumInsts{};
-#endif
+StaticEntryCount DebugStats;
 
 void InitializeInfoTables(Context::OperatingMode Mode) {
 // TODO: Bake non-Mode dependent tables upfront (compile-time) and patch in the mode-dependent ones here

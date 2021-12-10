@@ -13,7 +13,7 @@ namespace FEXCore::X86Tables {
 using namespace InstFlags;
 
 #define OPD(map_select, pp, opcode) (((map_select - 1) << 10) | (pp << 8) | (opcode))
-  static constexpr U16U8InfoStruct VEXTable[] = {
+  constexpr U16U8InfoStructTable VEXTable = {{
     // Map 0 (Reserved)
     // VEX Map 1
     {OPD(1, 0b00, 0x10), 1, X86InstInfo{"VMOVUPS",   TYPE_UNDEC, FLAGS_NONE, 0, nullptr}},
@@ -482,11 +482,11 @@ using namespace InstFlags;
     {OPD(3, 0b11, 0xF0), 1, X86InstInfo{"RORX", TYPE_INST, FLAGS_MODRM, 1, nullptr}},
 
     // VEX Map 4 - 31 (Reserved)
-  };
+  }};
 #undef OPD
 
 #define OPD(group, pp, opcode) (((group - TYPE_VEX_GROUP_12) << 4) | (pp << 3) | (opcode))
-  static constexpr U8U8InfoStruct VEXGroupTable[] = {
+  constexpr U8U8InfoStructTable VEXGroupTable = {{
     {OPD(TYPE_VEX_GROUP_12, 1, 0b010), 1, X86InstInfo{"VPSRLW",   TYPE_UNDEC, FLAGS_MODRM, 0, nullptr}},
     {OPD(TYPE_VEX_GROUP_12, 1, 0b100), 1, X86InstInfo{"VPSRAW",   TYPE_UNDEC, FLAGS_MODRM, 0, nullptr}},
     {OPD(TYPE_VEX_GROUP_12, 1, 0b110), 1, X86InstInfo{"VPSLLW",   TYPE_UNDEC, FLAGS_MODRM, 0, nullptr}},
@@ -506,11 +506,12 @@ using namespace InstFlags;
     {OPD(TYPE_VEX_GROUP_17, 0, 0b001), 1, X86InstInfo{"BLSR",     TYPE_INST, FLAGS_MODRM | FLAGS_VEX_DST, 0, nullptr}},
     {OPD(TYPE_VEX_GROUP_17, 0, 0b010), 1, X86InstInfo{"BLSMSK",   TYPE_INST, FLAGS_MODRM | FLAGS_VEX_DST, 0, nullptr}},
     {OPD(TYPE_VEX_GROUP_17, 0, 0b011), 1, X86InstInfo{"BLSI",     TYPE_INST, FLAGS_MODRM | FLAGS_VEX_DST, 0, nullptr}},
-  };
+  }};
 #undef OPD
 
 constinit auto VEXTableOps = X86TableBuilder::GenerateInitTable<MAX_VEX_TABLE_SIZE>(VEXTable);
-
 constinit auto VEXTableGroupOps = X86TableBuilder::GenerateInitTable<MAX_VEX_GROUP_TABLE_SIZE>(VEXGroupTable);
+
+UPDATE_STATIC_DEBUG_STATS(VEXTable.count + VEXGroupTable.count);
 
 }

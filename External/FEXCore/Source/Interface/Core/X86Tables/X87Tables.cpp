@@ -12,11 +12,9 @@ $end_info$
 namespace FEXCore::X86Tables {
 using namespace InstFlags;
 
-// TODO: This table has 2048 elements, not sure it's wise to constexpr it
-constinit std::array<X86InstInfo, MAX_X87_TABLE_SIZE> X87Ops = []() constexpr {
 #define OPD(op, modrmop) (((op - 0xD8) << 8) | modrmop)
 #define OPDReg(op, reg) (((op - 0xD8) << 8) | (reg << 3))
-  constexpr U16U8InfoStruct X87OpTable[] = {
+  constexpr U16U8InfoStructTable X87OpTable = {{
     // 0xD8
     {OPDReg(0xD8, 0), 1, X86InstInfo{"FADD",  TYPE_X87, FLAGS_MODRM, 0, nullptr}},
     {OPDReg(0xD8, 1), 1, X86InstInfo{"FMUL",  TYPE_X87, FLAGS_MODRM, 0, nullptr}},
@@ -260,11 +258,13 @@ constinit std::array<X86InstInfo, MAX_X87_TABLE_SIZE> X87Ops = []() constexpr {
       {OPD(0xDF, 0xF0), 8, X86InstInfo{"FCOMIP",  TYPE_X87,   FLAGS_POP, 0, nullptr}},
       //  / 7
       {OPD(0xDF, 0xF8), 8, X86InstInfo{"",        TYPE_INVALID, FLAGS_NONE, 0, nullptr}},
-  };
+  }};
 #undef OPD
 #undef OPDReg
 
-  return X86TableBuilder::GenerateX87Table<MAX_X87_TABLE_SIZE>(X87OpTable);
-}();
+// TODO: This table has 2048 elements, not sure it's wise to constexpr it
+constinit auto X87Ops = X86TableBuilder::GenerateX87Table<MAX_X87_TABLE_SIZE>(X87OpTable);
+
+UPDATE_STATIC_DEBUG_STATS(X87OpTable.count);
 
 }

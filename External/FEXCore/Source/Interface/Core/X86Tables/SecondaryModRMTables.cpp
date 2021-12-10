@@ -13,8 +13,7 @@ $end_info$
 namespace FEXCore::X86Tables {
 using namespace InstFlags;
 
-std::array<X86InstInfo, MAX_SECOND_MODRM_TABLE_SIZE> SecondModRMTableOps = []() constexpr {
-  constexpr U8U8InfoStruct SecondaryModRMExtensionOpTable[] = {
+  constexpr U8U8InfoStructTable SecondaryModRMExtensionOpTable = {{
     // REG /1
     {((0 << 3) | 0), 1, X86InstInfo{"MONITOR",  TYPE_PRIV,    FLAGS_NONE, 0, nullptr}},
     {((0 << 3) | 1), 1, X86InstInfo{"MWAIT",    TYPE_PRIV,    FLAGS_NONE, 0, nullptr}},
@@ -54,9 +53,10 @@ std::array<X86InstInfo, MAX_SECOND_MODRM_TABLE_SIZE> SecondModRMTableOps = []() 
     {((3 << 3) | 5), 1, X86InstInfo{"",         TYPE_INVALID, FLAGS_NONE, 0, nullptr}},
     {((3 << 3) | 6), 1, X86InstInfo{"",         TYPE_INVALID, FLAGS_NONE, 0, nullptr}},
     {((3 << 3) | 7), 1, X86InstInfo{"",         TYPE_INVALID, FLAGS_NONE, 0, nullptr}},
-  };
+  }};
 
-  return X86TableBuilder::GenerateInitTable<MAX_SECOND_MODRM_TABLE_SIZE>(SecondaryModRMExtensionOpTable);
-}();
+constinit auto SecondModRMTableOps = X86TableBuilder::GenerateInitTable<MAX_SECOND_MODRM_TABLE_SIZE>(SecondaryModRMExtensionOpTable);
+
+UPDATE_STATIC_DEBUG_STATS(SecondaryModRMExtensionOpTable.count);
 
 }

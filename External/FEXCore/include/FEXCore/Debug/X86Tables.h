@@ -519,4 +519,20 @@ extern FEX_DEFAULT_VISIBILITY std::array<X86InstInfo, MAX_XOP_GROUP_TABLE_SIZE> 
 
 // EVEX
 extern FEX_DEFAULT_VISIBILITY std::array<X86InstInfo, MAX_EVEX_TABLE_SIZE> EVEXTableOps;
+
+  struct StaticEntryCount {
+    uint64_t total = 0;
+    uint64_t num_insts = 0;
+
+    constexpr StaticEntryCount operator+(const StaticEntryCount& oth) const noexcept {
+      return { total + oth.total, num_insts + oth.num_insts };
+    }
+
+    constexpr StaticEntryCount& operator+=(const StaticEntryCount& oth) noexcept {
+      total += oth.total;
+      num_insts += oth.num_insts;
+      return *this;
+    }
+  };
+
 }
