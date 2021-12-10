@@ -47,7 +47,7 @@ uint64_t Total{};
 uint64_t NumInsts{};
 #endif
 
-void InitializeInfoTables(Context::OperatingMode Mode) {
+[[clang::xray_always_instrument]] void InitializeInfoTables(Context::OperatingMode Mode) {
   InitializeBaseTables(Mode);
   InitializeSecondaryTables(Mode);
   InitializePrimaryGroupTables(Mode);
