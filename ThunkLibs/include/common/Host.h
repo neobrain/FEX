@@ -33,6 +33,12 @@ namespace FEXCore {
     fprintf(stderr, "Failed to load %s from FEX executable\n", __FUNCTION__);
     std::abort();
   }
+
+  __attribute__((weak))
+  void MakeHostTrampolineForGuestFunctionAsyncCallable(HostToGuestTrampolinePtr*, unsigned AsyncWorkerThreadId) {
+    fprintf(stderr, "Failed to load %s from FEX executable\n", __FUNCTION__);
+    std::abort();
+  }
 }
 
 template<typename Fn>
@@ -94,11 +100,13 @@ fprintf(stderr, "FAILED TO FEXLDR_INIT\n"); \
     init_fn (); \
   }
 
+// Same as TrampolineInstanceInfo in Thunks.cpp
 struct GuestcallInfo {
   uintptr_t HostPacker;
-  void (*CallCallback)(uintptr_t GuestUnpacker, uintptr_t GuestTarget, void* argsrv);
+  void (*CallCallback)(uintptr_t GuestUnpacker, uintptr_t GuestTarget, void* argsrv, uintptr_t AsyncWorkerThread);
   uintptr_t GuestUnpacker;
   uintptr_t GuestTarget;
+  uintptr_t AsyncWorkerThread;
 };
 
 // Helper macro for reading an internal argument passed through the `r11`
@@ -124,7 +132,7 @@ struct CallbackUnpack<Result(Args...)> {
     PackedArguments<Result, Args...> packed_args = {
       args...
     };
-    guestcall->CallCallback(guestcall->GuestUnpacker, guestcall->GuestTarget, &packed_args);
+    guestcall->CallCallback(guestcall->GuestUnpacker, guestcall->GuestTarget, &packed_args, guestcall->AsyncWorkerThread);
     if constexpr (!std::is_void_v<Result>) {
       return packed_args.rv;
     }
@@ -195,6 +203,13 @@ void FinalizeHostTrampolineForGuestFunction(F* PreallocatedTrampolineForGuestFun
   FEXCore::FinalizeHostTrampolineForGuestFunction(
       (FEXCore::HostToGuestTrampolinePtr*)PreallocatedTrampolineForGuestFunction,
       (void*)&CallbackUnpack<F>::CallGuestPtr);
+}
+
+template<typename F>
+void MakeHostTrampolineForGuestFunctionAsyncCallable(F* PreallocatedTrampolineForGuestFunction, unsigned AsyncWorkerThreadId) {
+  FEXCore::MakeHostTrampolineForGuestFunctionAsyncCallable(
+      (FEXCore::HostToGuestTrampolinePtr*)PreallocatedTrampolineForGuestFunction,
+      AsyncWorkerThreadId);
 }
 
 template<typename T>
