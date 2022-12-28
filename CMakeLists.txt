@@ -442,6 +442,7 @@ if (BUILD_THUNKS)
       "-DSTRUCT_VERIFIER=${CMAKE_SOURCE_DIR}/Scripts/StructPackVerifier.py"
       "-DFEX_PROJECT_SOURCE_DIR=${FEX_PROJECT_SOURCE_DIR}"
       "-DGENERATOR_EXE=$<TARGET_FILE:thunkgen>"
+      "-DCMAKE_CXX_FLAGS=-fdiagnostics-color=always"
     INSTALL_COMMAND ""
     BUILD_ALWAYS ON
     DEPENDS thunkgen
