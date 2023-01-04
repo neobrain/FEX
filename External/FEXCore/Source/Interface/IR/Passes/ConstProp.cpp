@@ -1052,7 +1052,7 @@ bool ConstProp::Run(IREmitter *IREmit) {
     Changed = true;
   }
 
-  CodeMotionAroundSelects(IREmit, CurrentIR);
+//  CodeMotionAroundSelects(IREmit, CurrentIR);
   FCMPOptimization(IREmit, CurrentIR);
   LoadMemStoreMemImmediatePooling(IREmit, CurrentIR);
 
