@@ -341,9 +341,9 @@ FileManager::FileManager(FEXCore::Context::Context *ctx)
   if (false) {
     // Useful for debugging
     if (ThunkOverlays.size()) {
-      LogMan::Msg::IFmt("Thunk Overlays:");
+      LogMan::Msg::EFmt("Thunk Overlays:");
       for (const auto& [Overlay, ThunkPath] : ThunkOverlays) {
-        LogMan::Msg::IFmt("\t{} -> {}", Overlay, ThunkPath);
+        LogMan::Msg::EFmt("\t{} -> {}", Overlay, ThunkPath);
       }
     }
   }
@@ -368,6 +368,9 @@ std::string FileManager::GetEmulatedPath(const char *pathname, bool FollowSymlin
 
   auto thunkOverlay = ThunkOverlays.find(pathname);
   if (thunkOverlay != ThunkOverlays.end()) {
+    fprintf(stderr, "GetEmulatedPath: %s\n", pathname);
+    fprintf(stderr, "THUNKED\n");
+
     return thunkOverlay->second;
   }
 
