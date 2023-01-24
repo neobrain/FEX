@@ -359,6 +359,7 @@ void GenerateThunkLibsAction::ExecuteAction() {
 
 struct TypeAnnotations {
     bool is_opaque = false;
+    bool customize = false;
 };
 
 static TypeAnnotations GetTypeAnnotations(clang::ASTContext& context, clang::CXXRecordDecl* decl) {
@@ -373,6 +374,8 @@ static TypeAnnotations GetTypeAnnotations(clang::ASTContext& context, clang::CXX
         auto annotation = base.getType().getAsString();
         if (annotation == "fexgen::opaque_type") {
             ret.is_opaque = true;
+        } else if (annotation == "fexgen::customize") {
+            ret.customize = true;
         } else {
             throw report_error(base.getSourceRange().getBegin(), "Unknown type annotation");
         }
@@ -526,7 +529,8 @@ void GenerateThunkLibsAction::ParseInterface(clang::ASTContext& context) {
                             }
                         } else if (param->getType()->isPointerType()) {
                             auto pointee_type = param->getType()->getPointeeType()->getLocallyUnqualifiedSingleStepDesugaredType();
-                            if (types.contains(pointee_type.getTypePtr()) && types.at(pointee_type.getTypePtr()).is_opaque) {
+                            if ((types.contains(pointee_type.getTypePtr()) && types.at(pointee_type.getTypePtr()).is_opaque)
+                                  || pointee_type.getAsString() == "char") {
                                 // Nothing to do
                             } else if ( pointee_type->isStructureType() &&
                                         !(types.contains(pointee_type.getTypePtr()) &&
@@ -552,7 +556,13 @@ void GenerateThunkLibsAction::ParseInterface(clang::ASTContext& context) {
                                 }
 
                                 types.emplace(pointee_type.getTypePtr(), RepackedType { });
+                            } else if (/* TODO: Check for ptr_passthrough annotation instead */
+                                        param->getType().getAsString() == "union wl_argument *" ||
+                                        param->getType().getAsString() == "void (**)(void)" /* wl_proxy_add_listener */ ||
+                                        param->getType().getAsString() == "void *" /* wl_proxy_add_listener */) {
+                                // Nothing to do
                             } else {
+                                fprintf(stderr, "NAME: %s\n", pointee_type.getAsString().c_str());
                                 throw report_error(param->getBeginLoc(), "Unsupported parameter type")
                                               .addNote(report_error(emitted_function->getNameInfo().getLoc(), "in function", clang::DiagnosticsEngine::Note))
                                               .addNote(report_error(template_arg_loc, "used in annotation here", clang::DiagnosticsEngine::Note));
@@ -605,15 +615,47 @@ void GenerateThunkLibsAction::ParseInterface(clang::ASTContext& context) {
 
 void GenerateThunkLibsAction::EmitOutput() {
     static auto format_decl = [](clang::QualType type, const std::string_view& name) {
-        if (type->isFunctionPointerType()) {
+        clang::QualType innermostPointee = type;
+        while (innermostPointee->isPointerType()) {
+          innermostPointee = innermostPointee->getPointeeType();
+        }
+        if (type.getAsString() == "void (**)(void)") {
+          fprintf(stderr, "OMGOMG: %s, %d\n", innermostPointee.getAsString().c_str(), innermostPointee->isFunctionType());
+        }
+        if (innermostPointee->isFunctionType()) {
             auto signature = type.getAsString();
-            const char needle[] = { '(', '*', ')' };
-            auto it = std::search(signature.begin(), signature.end(), std::begin(needle), std::end(needle));
-            if (it == signature.end()) {
+
+            // Search for strings like (*), (**), or (*****)
+            auto needle = signature.begin();
+            for (; needle != signature.end(); ++needle) {
+                if (signature.end() - needle < 3 ||
+                    std::string_view { &*needle, 2 } != "(*") {
+                    continue;
+                }
+                while (*++needle == '*') {
+                }
+                if (*needle == ')') {
+                    break;
+                }
+            }
+//            const char needle[] = { '(', '*', ')' };
+//            auto it = std::search(signature.begin(), signature.end(), std::begin(needle), std::end(needle));
+//            if (it == signature.end()) {
+//            fprintf(stderr, "not found star in %s\n", signature.c_str());
+//                // It's *probably* a typedef, so this should be safe after all
+//                return fmt::format("{} {}", signature, name);
+//            } else {
+//            fprintf(stderr, "found star\n");
+//                signature.insert(it + 2, name.begin(), name.end());
+//                return signature;
+//            }
+            if (needle == signature.end()) {
+            fprintf(stderr, "not found star in %s\n", signature.c_str());
                 // It's *probably* a typedef, so this should be safe after all
                 return fmt::format("{} {}", signature, name);
             } else {
-                signature.insert(it + 2, name.begin(), name.end());
+            fprintf(stderr, "found star\n");
+                signature.insert(needle, name.begin(), name.end());
                 return signature;
             }
         } else {
@@ -791,6 +833,10 @@ void GenerateThunkLibsAction::EmitOutput() {
                 fmt::print(file, "  using type = {}*;\n", struct_name);
                 fmt::print(file, "  type data;\n");
                 fmt::print(file, "}};\n");
+                fmt::print(file, "template<>\nstruct guest_layout<const {}*> {{\n", struct_name);
+                fmt::print(file, "  using type = {}*;\n", struct_name);
+                fmt::print(file, "  type data;\n");
+                fmt::print(file, "}};\n");
 
                 // Host layout definition
                 fmt::print(file, "template<>\n");
@@ -802,12 +848,28 @@ void GenerateThunkLibsAction::EmitOutput() {
                 fmt::print(file, "    data {{ reinterpret_cast<{}*>(from.data) }} {{\n", struct_name);
                 fmt::print(file, "  }}\n");
                 fmt::print(file, "}};\n\n");
+                fmt::print(file, "template<>\n");
+                fmt::print(file, "struct host_layout<const {}*> {{\n", struct_name);
+                fmt::print(file, "  using type = {}*;\n", struct_name);
+                fmt::print(file, "  type data;\n");
+                fmt::print(file, "\n");
+                fmt::print(file, "  host_layout(const guest_layout<const {}*>& from) :\n", struct_name);
+                fmt::print(file, "    data {{ reinterpret_cast<{}*>(from.data) }} {{\n", struct_name);
+                fmt::print(file, "  }}\n");
+                fmt::print(file, "}};\n\n");
 
                 fmt::print(file, "template<>\n");
                 fmt::print(file, "struct unpacked_arg<{}*> {{\n", struct_name);
                 fmt::print(file, "  host_layout<{}*> data;\n", struct_name);
                 fmt::print(file, "  unpacked_arg(const guest_layout<{}*>& from) : data(from) {{}}\n", struct_name);
                 fmt::print(file, "  {}* get() {{ return data.data; }}\n", struct_name);
+                fmt::print(file, "}};\n\n");
+
+                fmt::print(file, "template<>\n");
+                fmt::print(file, "struct unpacked_arg<const {}*> {{\n", struct_name);
+                fmt::print(file, "  host_layout<const {}*> data;\n", struct_name);
+                fmt::print(file, "  unpacked_arg(const guest_layout<const {}*>& from) : data(from) {{}}\n", struct_name);
+                fmt::print(file, "  const {}* get() {{ return data.data; }}\n", struct_name);
                 fmt::print(file, "}};\n\n");
                 continue;
             }
@@ -909,8 +971,10 @@ void GenerateThunkLibsAction::EmitOutput() {
                     auto cb = thunk.callbacks.find(idx);
                     if (cb != thunk.callbacks.end() && cb->second.is_guest) {
                         file << "fex_guest_function_ptr a_" << idx;
+                    } else if (type.getAsString() == "union wl_argument *" /* TODO: Instead, check for ptr_passthrough annotation */) {
+                        fmt::print(file, "guest_layout<{}> * a_{}", type->getPointeeType().getAsString(), idx);
                     } else {
-                      file << format_decl(type, fmt::format("a_{}", idx));
+                        file << format_decl(type, fmt::format("a_{}", idx));
                     }
                 }
                 // Using trailing return type as it makes handling function pointer returns much easier
@@ -929,12 +993,12 @@ void GenerateThunkLibsAction::EmitOutput() {
                 }
 //} else {
 //                file << format_struct_members(thunk, "  ");
-//                if (!thunk.return_type->isVoidType()) {
-//                    file << "  " << format_decl(thunk.return_type, "rv") << ";\n";
+                if (!thunk.return_type->isVoidType()) {
+                    file << "  " << format_decl(thunk.return_type, "rv") << ";\n";
 //                } else if (thunk.param_types.size() == 0) {
 //                    // Avoid "empty struct has size 0 in C, size 1 in C++" warning
 //                    file << "    char force_nonempty;\n";
-//                }
+                }
 //}
                 file << "};\n";
                 return struct_name;
@@ -964,6 +1028,7 @@ auto GetTypeName = [](const clang::QualType& type) {
             for (unsigned param_idx = 0; param_idx != thunk.param_types.size(); ++param_idx) {
                 auto& param_type = thunk.param_types[param_idx];
                 // Layout repacking happens here
+                // TODO: Omit if ptr_passthrough is used
                 fmt::print(file, "  unpacked_arg<{}> a_{} {{ args->a_{} }};\n", GetTypeName(param_type), param_idx, param_idx);
 
                 // Custom repacking happens here
@@ -977,6 +1042,7 @@ auto GetTypeName = [](const clang::QualType& type) {
             {
                 auto format_param = [&](std::size_t idx) {
                     std::string raw_arg = fmt::format("a_{}.get()", idx);
+                    auto& type = thunk.param_types[idx];
 
                     auto cb = thunk.callbacks.find(idx);
                     if (cb != thunk.callbacks.end() && cb->second.is_stub) {
@@ -988,6 +1054,9 @@ auto GetTypeName = [](const clang::QualType& type) {
                         // Use comma operator to inject a function call before returning the argument
                         return "(FinalizeHostTrampolineForGuestFunction(" + arg_name + "), " + arg_name + ")";
 
+                    } else if (type.getAsString() == "union wl_argument *" /* TODO: Instead, check for ptr_passthrough annotation */) {
+                        // Turn guest_layout<T*> into a pointer to guest_layout<T>
+                        return fmt::format("args->a_{}.get_pointer()", idx);
                     } else {
                         return raw_arg;
                     }

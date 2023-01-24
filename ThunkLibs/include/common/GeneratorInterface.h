@@ -13,10 +13,18 @@ struct callback_annotation_base {
 struct callback_stub : callback_annotation_base {};
 struct callback_guest : callback_annotation_base {};
 
+// If used, fex_customize must be specialized for the annotated type
+struct customize {};
+
 // If used, fex_custom_repack must be specialized for the annotated struct member
 struct custom_repack {};
 
 // Pointers to types annotated with this will be passed through without change
 struct opaque_type {};
+
+// Function parameter annotation.
+// Pointers are passed through to host (extending to 64-bit if needed) without modifying the pointee.
+// The type passed to Host is guest_layout<PointeeType>*.
+struct ptr_passthrough {};
 
 } // namespace fexgen

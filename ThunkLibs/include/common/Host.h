@@ -256,9 +256,14 @@ struct unpacked_arg {
   }
 };
 
+// TODO: This shouldn't hold temporary storage for pointers that don't need repacking!
 template<typename T>
 struct unpacked_arg<T*> {
-  unpacked_arg(const guest_layout<T*>& data) : data(&extra), extra(*data.get_pointer()) {
+  unpacked_arg(const guest_layout<T*>& data) : data(data.get_pointer() ? &extra : nullptr),
+    opt {
+      data.get_pointer() ? Opt { *data.get_pointer() }
+      : Opt { .uninit = {} }
+    } {
   }
 
   T* get() {
@@ -268,7 +273,25 @@ struct unpacked_arg<T*> {
   }
 
   host_layout<T>* data;
-  host_layout<T> extra; // Temporary storage for layout-repacked data
+
+  // Crude hack to allow leaving this uninitialized for nullptrs
+  union Opt {
+    host_layout<T> extra2; // Temporary storage for layout-repacked data
+    char uninit;
+  } opt;
+  host_layout<T>& extra = opt.extra2; // Temporary storage for layout-repacked data
+};
+
+template<>
+struct unpacked_arg<void*> {
+  unpacked_arg(/*const */guest_layout<void*>& data) : data(reinterpret_cast<host_layout<void>*>(data.get_pointer())) {
+  }
+
+  void* get() {
+    return reinterpret_cast<void*>(data);
+  }
+
+  host_layout<void>* data;
 };
 
 template<typename>

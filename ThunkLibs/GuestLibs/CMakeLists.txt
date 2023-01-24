@@ -213,6 +213,9 @@ if (BITNESS EQUAL 64)
   target_include_directories(libvulkan-guest-deps INTERFACE ${FEX_PROJECT_SOURCE_DIR}/External/Vulkan-Headers/include/)
   add_guest_lib(vulkan "libvulkan.so.1")
 
+  generate(libwayland-client ${CMAKE_CURRENT_SOURCE_DIR}/../libwayland-client/libwayland-client_interface.cpp)
+  add_guest_lib(wayland-client "libvulkan.so.0.20.0")
+
   #generate(libxcb ${CMAKE_CURRENT_SOURCE_DIR}/../libxcb/libxcb_interface.cpp)
   #add_guest_lib(xcb "libxcb.so.1")
 
