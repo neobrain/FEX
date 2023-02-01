@@ -554,6 +554,10 @@ namespace FEXCore {
 
     FEX_DEFAULT_VISIBILITY
     void MakeHostTrampolineForGuestFunctionAsyncCallable(HostToGuestTrampolinePtr* TrampolineAddress, unsigned AsyncWorkerThreadId) {
+      if (!TrampolineAddress) {
+        return;
+      }
+
       auto& Trampoline = GetInstanceInfo(TrampolineAddress);
 
       LOGMAN_THROW_A_FMT(Trampoline.CallCallback == (uintptr_t)&ThunkHandler_impl::CallCallback,

@@ -67,9 +67,14 @@ MAKE_THUNK(fex, unregister_async_worker_thread, "0x9d, 0xb2, 0xf4, 0xb4, 0x83, 0
 #define LOAD_LIB_BASE(name, init_fn) \
   __attribute__((constructor)) static void loadlib() \
   { \
+    static bool inited = false; \
+    if (inited) { \
+      return; \
+    } \
     LoadlibArgs args =  { #name }; \
     fexthunks_fex_loadlib(&args); \
     if ((init_fn)) ((void(*)())init_fn)(); \
+    inited = true; \
   }
 
 #define LOAD_LIB(name) LOAD_LIB_BASE(name, nullptr)

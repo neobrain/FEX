@@ -297,6 +297,7 @@ struct unpacked_arg<T*> {
   host_layout<T>& extra = opt.extra2; // Temporary storage for layout-repacked data
 };
 
+// TODO: Should have an extra template argument to enable plain passthrough
 template<>
 struct unpacked_arg<void*> {
   unpacked_arg(/*const */guest_layout<void*>& data) : data(reinterpret_cast<host_layout<void>*>(data.get_pointer())) {
@@ -307,6 +308,36 @@ struct unpacked_arg<void*> {
   }
 
   host_layout<void>* data;
+};
+
+// TODO: Use passthrough argument for this instead
+template<>
+struct unpacked_arg<void(**)()> {
+  using type = void(**)();
+
+  unpacked_arg(/*const */guest_layout<type>& data) : data(reinterpret_cast<uint64_t>(data.get_pointer())) {
+  }
+
+  type get() {
+    return reinterpret_cast<type>(data);
+  }
+
+  uint64_t data;
+};
+
+// TODO: Use passthrough argument for this instead
+template<>
+struct unpacked_arg<const char*> {
+  using type = const char*;
+
+  unpacked_arg(/*const */guest_layout<type>& data) : data(reinterpret_cast<uint64_t>(data.get_pointer())) {
+  }
+
+  type get() {
+    return reinterpret_cast<type>(data);
+  }
+
+  uint64_t data;
 };
 
 template<typename>
