@@ -1,5 +1,7 @@
 #include <common/GeneratorInterface.h>
 
+#include <type_traits>
+
 template<auto>
 struct fex_gen_config {
     unsigned version = 1;
@@ -17,6 +19,13 @@ template<> struct fex_gen_config<vkGetInstanceProcAddr> : fexgen::custom_host_im
 #endif
 
 
+template<typename>
+struct fex_gen_type {};
+
+template<> struct fex_gen_type<VkBuffer_T> : fexgen::opaque_type {};
+template<> struct fex_gen_type<VkCommandBuffer_T> : fexgen::opaque_type {};
+template<> struct fex_gen_type<VkPipeline_T> : fexgen::opaque_type {};
+
 namespace internal {
 
 template<auto>
@@ -24,6 +33,7 @@ struct fex_gen_config : fexgen::generate_guest_symtable, fexgen::indirect_guest_
 };
 
 //template<> struct fex_gen_config<&VkInstanceCreateInfo::pNext> : fexgen::custom_repack {};
+//template<> struct fex_gen_config<&VkCommandBufferBeginInfo::pNext> : fexgen::custom_repack {};
 
 //template<> struct fex_gen_config<vkCreateInstance> : fexgen::custom_host_impl {};
 //template<> struct fex_gen_config<vkDestroyInstance> {};
@@ -117,21 +127,30 @@ template<> struct fex_gen_config<vkDestroyCommandPool> {};
 template<> struct fex_gen_config<vkResetCommandPool> {};
 template<> struct fex_gen_config<vkAllocateCommandBuffers> {};
 template<> struct fex_gen_config<vkFreeCommandBuffers> {};
+// TODO: Needs support for annotating pNext in const pointers
 template<> struct fex_gen_config<vkBeginCommandBuffer> {};
 template<> struct fex_gen_config<vkEndCommandBuffer> {};
 template<> struct fex_gen_config<vkResetCommandBuffer> {};
+#endif
 template<> struct fex_gen_config<vkCmdBindPipeline> {};
+#if 0
 template<> struct fex_gen_config<vkCmdSetViewport> {};
 template<> struct fex_gen_config<vkCmdSetScissor> {};
+#endif
 template<> struct fex_gen_config<vkCmdSetLineWidth> {};
 template<> struct fex_gen_config<vkCmdSetDepthBias> {};
+#if 0
 template<> struct fex_gen_config<vkCmdSetBlendConstants> {};
+#endif
 template<> struct fex_gen_config<vkCmdSetDepthBounds> {};
 template<> struct fex_gen_config<vkCmdSetStencilCompareMask> {};
 template<> struct fex_gen_config<vkCmdSetStencilWriteMask> {};
 template<> struct fex_gen_config<vkCmdSetStencilReference> {};
+#if 0
 template<> struct fex_gen_config<vkCmdBindDescriptorSets> {};
+#endif
 template<> struct fex_gen_config<vkCmdBindIndexBuffer> {};
+#if 0
 template<> struct fex_gen_config<vkCmdBindVertexBuffers> {};
 #endif
 template<> struct fex_gen_config<vkCmdDraw> {};

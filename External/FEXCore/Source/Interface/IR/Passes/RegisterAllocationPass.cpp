@@ -146,15 +146,18 @@ namespace {
     delete Graph;
   }
 
-  void ResetRegisterGraph(RegisterGraph *Graph, uint64_t NodeCount) {
+  [[clang::xray_always_instrument]] void ResetRegisterGraph(RegisterGraph *Graph, uint64_t NodeCount) {
     NodeCount = FEXCore::AlignUp(NodeCount, REGISTER_NODES_PER_PAGE);
 
-    // Clear to free the Bucketlists which have unique_ptrs
-    // Resize to our correct size
-    Graph->Nodes.clear();
+    // Free memory occupied by Bucketlists, then resize to our correct size
+    for (auto& node : Graph->Nodes) {
+      node.Interferences.Clear();
+    }
     Graph->Nodes.resize(NodeCount);
 
-    Graph->VisitedNodePredecessors.clear();
+    for (auto& VisitedPreds : Graph->VisitedNodePredecessors) {
+      VisitedPreds.second.clear();
+    }
     Graph->AllocData = RegisterAllocationData::Create(NodeCount);
     Graph->NodeCount = NodeCount;
   }
@@ -254,7 +257,7 @@ namespace {
   };
 
   // Walk the IR and set the node classes
-  void FindNodeClasses(RegisterGraph *Graph, FEXCore::IR::IRListView *IR) {
+  [[clang::xray_always_instrument]]void FindNodeClasses(RegisterGraph *Graph, FEXCore::IR::IRListView *IR) {
     for (auto [CodeNode, IROp] : IR->GetAllCode()) {
       // If the destination hasn't yet been set then set it now
       if (GetHasDest(IROp->Op)) {
@@ -315,16 +318,16 @@ namespace {
         return info & 0xff00'0000;
       }
 
-      void SpillOne(FEXCore::IR::IREmitter *IREmit);
+      [[clang::xray_always_instrument]]void SpillOne(FEXCore::IR::IREmitter *IREmit);
 
-      void CalculateLiveRange(FEXCore::IR::IRListView *IR);
-      void OptimizeStaticRegisters(FEXCore::IR::IRListView *IR);
-      void CalculateBlockInterferences(FEXCore::IR::IRListView *IR);
-      void CalculateBlockNodeInterference(FEXCore::IR::IRListView *IR);
-      void CalculateNodeInterference(FEXCore::IR::IRListView *IR);
-      void AllocateVirtualRegisters();
-      void CalculatePredecessors(FEXCore::IR::IRListView *IR);
-      void RecursiveLiveRangeExpansion(FEXCore::IR::IRListView *IR,
+      [[clang::xray_always_instrument]]void CalculateLiveRange(FEXCore::IR::IRListView *IR);
+      [[clang::xray_always_instrument]]void OptimizeStaticRegisters(FEXCore::IR::IRListView *IR);
+      [[clang::xray_always_instrument]]void CalculateBlockInterferences(FEXCore::IR::IRListView *IR);
+      [[clang::xray_always_instrument]]void CalculateBlockNodeInterference(FEXCore::IR::IRListView *IR);
+      [[clang::xray_always_instrument]]void CalculateNodeInterference(FEXCore::IR::IRListView *IR);
+      [[clang::xray_always_instrument]]void AllocateVirtualRegisters();
+      [[clang::xray_always_instrument]]void CalculatePredecessors(FEXCore::IR::IRListView *IR);
+      [[clang::xray_always_instrument]]void RecursiveLiveRangeExpansion(FEXCore::IR::IRListView *IR,
                                        IR::NodeID Node, IR::NodeID DefiningBlockID,
                                        LiveRange *LiveRange,
                                        const std::unordered_set<IR::NodeID> &Predecessors,
@@ -340,7 +343,7 @@ namespace {
                                                 int32_t RematCost = -1);
       uint32_t FindSpillSlot(IR::NodeID Node, FEXCore::IR::RegisterClassType RegisterClass);
 
-      bool RunAllocateVirtualRegisters(IREmitter *IREmit);
+      [[clang::xray_always_instrument]] bool RunAllocateVirtualRegisters(IREmitter *IREmit);
   };
 
   ConstrainedRAPass::ConstrainedRAPass(FEXCore::IR::Pass* _CompactionPass, bool _OptimizeSRA, bool _SupportsAVX)
@@ -1511,7 +1514,9 @@ namespace {
 
 
   void ConstrainedRAPass::CalculatePredecessors(FEXCore::IR::IRListView *IR) {
-    Graph->BlockPredecessors.clear();
+    for (auto& BlockPredecessor: Graph->BlockPredecessors) {
+      BlockPredecessor.second.clear();
+    }
 
     for (auto [BlockNode, BlockIROp] : IR->GetBlocks()) {
       auto CodeBlock = BlockIROp->C<IROp_CodeBlock>();

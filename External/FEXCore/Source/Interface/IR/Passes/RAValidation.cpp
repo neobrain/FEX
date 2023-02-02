@@ -233,7 +233,8 @@ bool RAValidation::Run(IREmitter *IREmit) {
 
       if (IsFowardsEdge(PredecessorID) && !HaveState) {
         // We are probably about to visit this node anyway, remove it
-        std::remove(BlocksToVisit.begin(), BlocksToVisit.end(), Predecessor);
+        auto it = std::find(BlocksToVisit.begin(), BlocksToVisit.end(), Predecessor);
+        BlocksToVisit.erase(it);
 
         // Add the missing predecessor to start of queue
         BlocksToVisit.push_front(Predecessor);

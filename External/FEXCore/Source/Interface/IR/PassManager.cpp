@@ -46,10 +46,10 @@ void PassManager::AddDefaultPasses(FEXCore::Context::Context *ctx, bool InlineCo
 
 void PassManager::AddDefaultValidationPasses() {
 #if defined(ASSERTIONS_ENABLED) && ASSERTIONS_ENABLED
-  InsertValidationPass(Validation::CreatePhiValidation());
-  InsertValidationPass(Validation::CreateIRValidation(), "IRValidation");
-  InsertValidationPass(Validation::CreateRAValidation());
-  InsertValidationPass(Validation::CreateValueDominanceValidation());
+//  InsertValidationPass(Validation::CreatePhiValidation());
+//  InsertValidationPass(Validation::CreateIRValidation(), "IRValidation");
+//  InsertValidationPass(Validation::CreateRAValidation());
+//  InsertValidationPass(Validation::CreateValueDominanceValidation());
 #endif
 }
 

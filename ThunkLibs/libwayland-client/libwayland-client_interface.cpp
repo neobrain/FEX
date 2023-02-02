@@ -20,6 +20,8 @@ template<> struct fex_gen_type<wl_interface> : fexgen::opaque_type, fexgen::cust
 //template<> struct fex_gen_type<wl_argument> /*: fexgen::custom_repack*/ {};
 
 
+template<> struct fex_gen_config<wl_proxy_destroy> : fexgen::custom_guest_entrypoint {};
+
 template<> struct fex_gen_config<wl_display_connect> {};
 template<> struct fex_gen_config<wl_display_roundtrip> {};
 template<> struct fex_gen_config<wl_proxy_get_version> {};

@@ -223,6 +223,14 @@ static void wl_argument_from_va_list(const char *signature, wl_argument *args,
   }
 }
 
+extern "C" void wl_proxy_destroy(struct wl_proxy *proxy) {
+fprintf(stderr, "TRIGGERING GUEST THUNK CRASH in wl_proxy_destroy\n");
+int *ptr = nullptr;
+ptr[0] = 4;
+
+  return fexfn_pack_wl_proxy_destroy(proxy);
+}
+
 #define WL_CLOSURE_MAX_ARGS 20
 extern "C" wl_proxy *wl_proxy_marshal_flags(wl_proxy *proxy, uint32_t opcode,
            const wl_interface *interface,
@@ -237,6 +245,13 @@ if (!inited) {
 }
 
   fprintf(stderr, "WAYLAND GUEST: %s with proxy %p, using interface %s\n", __FUNCTION__, proxy, ((wl_proxy_private*)proxy)->interface->name);
+
+static int lol = 0;
+if (lol++ == 5) {
+fprintf(stderr, "TRIGGERING GUEST THUNK CRASH\n");
+int *ptr = nullptr;
+ptr[0] = 4;
+}
 
   wl_argument args[WL_CLOSURE_MAX_ARGS];
   va_list ap;

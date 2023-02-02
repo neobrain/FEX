@@ -198,10 +198,13 @@ namespace FEXCore {
             WorkerState->Thread = Thread;
           }
 
+          pthread_setname_np(pthread_self(), "ThunkAsyncWorkerThread");
+
           // Pause thread until woken up by UnregisterAsyncWorkerThread
           {
             std::unique_lock lock(WorkerState->m);
             WorkerState->var.wait(lock, [WorkerState]() -> bool { return WorkerState->done; });
+            fprintf(stderr, "EXITING ASYNC THUNK WORKER THREAD\n");
           }
 
         }

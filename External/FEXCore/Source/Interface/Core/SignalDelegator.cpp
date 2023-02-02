@@ -93,6 +93,7 @@ namespace FEXCore {
 
     if (!Thread) {
       LogMan::Msg::EFmt("[{}] Thread has received a signal and hasn't registered itself with the delegate! Programming error!", FHU::Syscalls::gettid());
+      std::abort();
     }
     else {
       for (auto &Handler : Handler.Handlers) {

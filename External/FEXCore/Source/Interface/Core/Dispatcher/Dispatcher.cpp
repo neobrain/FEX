@@ -286,7 +286,7 @@ void Dispatcher::RestoreThreadState(FEXCore::Core::InternalThreadState *Thread, 
       }
     }
     else {
-      if (Type == RestoreType::TYPE_NONRT) {
+      if (Type == RestoreType::TYPE_NONREALTIME) {
         // Signal frame layout on stack needs to be as follows
         // SigFrame_i32
         // FPState

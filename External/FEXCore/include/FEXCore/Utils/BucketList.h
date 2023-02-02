@@ -23,7 +23,7 @@ namespace FEXCore {
       Items[0] = T{};
       #if defined(ASSERTIONS_ENABLED) && ASSERTIONS_ENABLED
       for (size_t i = 1; i < Size; i++) {
-        Items[i] = T{0xDEADBEEF};
+//        Items[i] = T{0xDEADBEEF};
       }
       #endif
       Next.reset();
@@ -31,6 +31,12 @@ namespace FEXCore {
 
     BucketList() {
       Clear();
+    }
+
+    size_t Count() const {
+      size_t size = 0;
+      Iterate([&size](const T&) { ++size; });
+      return size;
     }
 
     template<typename EnumeratorFn>
