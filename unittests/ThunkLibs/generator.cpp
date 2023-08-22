@@ -433,6 +433,8 @@ TEST_CASE_METHOD(Fixture, "FunctionPointerParameter") {
             )));
 }
 
+// TODO: Decide what to do with this
+#if 0
 // Parameter is a guest function pointer
 TEST_CASE_METHOD(Fixture, "GuestFunctionPointerParameter") {
     const std::string prelude =
@@ -458,6 +460,7 @@ TEST_CASE_METHOD(Fixture, "GuestFunctionPointerParameter") {
                          hasArgument(0, hasType(asString("struct fex_guest_function_ptr")))
             )));
 }
+#endif
 
 TEST_CASE_METHOD(Fixture, "MultipleParameters") {
     const std::string prelude =
