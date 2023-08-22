@@ -13,6 +13,9 @@ struct callback_annotation_base {
 struct callback_stub : callback_annotation_base {};
 struct callback_guest : callback_annotation_base {};
 
+// If used, fex_custom_repack must be specialized for the annotated struct member
+struct custom_repack {};
+
 // Type annotation to indicate that guest_layout/host_layout definitions should
 // be emitted even if the type is non-repackable. Pointer members will be
 // copied (or zero-extended) without regard for the referred data.
