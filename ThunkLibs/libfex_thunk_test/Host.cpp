@@ -21,4 +21,14 @@ static uint32_t fexfn_impl_libfex_thunk_test_QueryOffsetOf(guest_layout<Reorderi
     }
 }
 
+template<>
+void fex_custom_repack<&CustomRepackedType::data>(host_layout<CustomRepackedType>& to, guest_layout<CustomRepackedType> const& from) {
+  to.data.custom_repack_invoked = 1;
+}
+
+template<>
+void fex_custom_repack_postcall<&CustomRepackedType::data>(ReorderingType* const&) {
+
+}
+
 EXPORTS(libfex_thunk_test)
