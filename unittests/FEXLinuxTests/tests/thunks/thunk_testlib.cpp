@@ -29,6 +29,7 @@ struct Fixture {
   GET_SYMBOL(GetReorderingTypeMember);
   GET_SYMBOL(ModifyReorderingTypeMembers);
   GET_SYMBOL(QueryOffsetOf);
+
   GET_SYMBOL(RanCustomRepack);
 };
 
