@@ -289,7 +289,8 @@ extern "C" {
     MakeHostFunctionGuestCallable(ret->idlist_alloc);
 #if (X11_VERSION_MAJOR >= 1 && X11_VERSION_MINOR >= 7 && X11_VERSION_PATCH >= 0)
     // Doesn't exist on older X11
-    MakeHostFunctionGuestCallable(ret->exit_handler);
+    // TODO: This takes a void* parameter, so it can't be handled automatically yet.
+//    MakeHostFunctionGuestCallable(ret->exit_handler);
 #endif
 
     return ret;
@@ -299,7 +300,7 @@ extern "C" {
     for(auto handler = display->async_handlers; handler; handler = handler->next) {
       // Make host-callable and overwrite in-place
       // NOTE: This data seems to be stack-allocated specifically for XReply usually, so it's *probably* safe to overwrite
-      handler->handler = AllocateHostTrampolineForGuestFunction(handler->handler);
+      handler->handler = (decltype(handler->handler))AllocateHostTrampolineForGuestFunction(handler->handler);
     }
     return fexfn_pack__XReply(display, reply, extra, discard);
   }

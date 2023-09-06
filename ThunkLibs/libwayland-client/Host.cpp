@@ -110,6 +110,7 @@ static void repack_guest_wl_interface_to_host(const wl_interface* guest_interfac
     for (int type = 0; type < num_types; ++type) {
       uintptr_t guest_interface_addr = ((uint32_t*)(uintptr_t)guest_event->types.data)[type];
       types[type] = guest_interface_addr ? lookup_wl_interface(reinterpret_cast<const wl_interface*>(guest_interface_addr)) : nullptr;
+      fprintf(stderr, "  EVENT %d type %d: %p\n", i, type, types[type]);
     }
     memcpy((void*)&host_interface->events[i].types, &types, sizeof(types));
   }
@@ -118,9 +119,23 @@ static void repack_guest_wl_interface_to_host(const wl_interface* guest_interfac
 
 // Maps guest interface pointers to host pointers
 wl_interface* lookup_wl_interface(const wl_interface* interface) {
+const char *interface_name = !interface ? "null" :
+#ifdef IS_32BIT_THUNK
+  (const char*)(uint32_t)(uintptr_t)interface->name; // Version field might "leak" into the upper 32 bits, so truncate them
+#else
+  interface->name;
+#endif
+  fprintf(stderr, "WAYLAND HOST: %s using interface %p (%s)\n", __FUNCTION__, interface, interface_name);
+
   // Used e.g. for wl_shm_pool_destroy
   if (interface == nullptr) {
     return nullptr;
+  }
+
+  for (auto& interface_mapping : guest_to_host_interface) {
+    if (interface_mapping.first == interface) {
+      fprintf(stderr, "HOST Proxy %s_interface: %p (<- %p on guest)\n", interface_mapping.second->name, (void*)interface_mapping.second, interface_mapping.first);
+    }
   }
 
   if (!guest_to_host_interface.count((void*)interface)) {
@@ -158,6 +173,24 @@ fexfn_impl_libwayland_client_wl_proxy_marshal_array(
     std::memcpy(&host_args[i], &args.get_pointer()[i], sizeof(args.get_pointer()[i]));
   }
 
+  // Iterate over all arguments as described by the interface. If any of them are non-null, make sure to translate proxies/interfaces!
+  {
+    const wl_message* method = &(((wl_proxy_private*)proxy)->interface->methods[opcode]);
+    int arg_count = 0;
+    for (auto* ptr = method->signature; *ptr; ++ptr) {
+      if (isalpha(*ptr)) {
+        ++arg_count;
+      }
+    }
+
+    for (int arg_idx = 0; arg_idx < arg_count; ++arg_idx) {
+      if (method->types[arg_idx] != nullptr && host_args[arg_idx].o != nullptr) {
+        fprintf(stderr, "FOUND ARG %" PRIx64 " OF TYPE %s\n", (uint64_t)(uintptr_t)host_args[arg_idx].o, method->types[arg_idx]->name);
+        // TODO: Validate host_args[arg_idx].o is a valid 32-bit pointer
+      }
+    }
+  }
+
   fexldr_ptr_libwayland_client_wl_proxy_marshal_array(proxy, opcode, host_args.data());
 }
 
@@ -168,6 +201,8 @@ fexfn_impl_libwayland_client_wl_proxy_marshal_array_constructor_versioned(
             const wl_interface *interface,
             uint32_t version) {
   interface = lookup_wl_interface(interface);
+
+  fprintf(stderr, "WAYLAND HOST: Marshaling %s with proxy %p, using interface %p (%s) method %d (max: %d)\n", __FUNCTION__, proxy, interface, interface ? interface->name : "(null)", opcode, interface ? interface->method_count : 0);
 
   // NOTE: "interface" and "name" are the first members of their respective parent structs, so this is safe to read even on 32-bit
   if (((wl_proxy_private*)proxy)->interface->name == std::string_view { "wl_registry" }) {
@@ -186,6 +221,7 @@ fexfn_impl_libwayland_client_wl_proxy_marshal_array_constructor_versioned(
       memcpy(host_interface, interface, sizeof(wl_interface));
 #endif
     }
+    fprintf(stderr, "HOST: wl_registry_bind for guest interface %s (%p -> %p)\n", interface->name, interface, host_interface);
   }
 
 #define WL_CLOSURE_MAX_ARGS 20
@@ -195,6 +231,24 @@ fexfn_impl_libwayland_client_wl_proxy_marshal_array_constructor_versioned(
     //       we need to make sure the upper 32-bits are explicitly zeroed
     std::memset(&host_args[i], 0, sizeof(host_args[i]));
     std::memcpy(&host_args[i], &args.get_pointer()[i], sizeof(args.get_pointer()[i]));
+  }
+
+  // Iterate over all arguments as described by the interface. If any of them are non-null, make sure to translate proxies/interfaces!
+  {
+    const wl_message* method = &(((wl_proxy_private*)proxy)->interface->methods[opcode]);
+    int arg_count = 0;
+    for (auto* ptr = method->signature; *ptr; ++ptr) {
+      if (isalpha(*ptr)) {
+        ++arg_count;
+      }
+    }
+
+    for (int arg_idx = 0; arg_idx < arg_count; ++arg_idx) {
+      if (method->types[arg_idx] != nullptr && host_args[arg_idx].o != nullptr) {
+        fprintf(stderr, "FOUND ARG %" PRIx64 " OF TYPE %s\n", (uint64_t)(uintptr_t)host_args[arg_idx].o, method->types[arg_idx]->name);
+        // TODO: Validate host_args[arg_idx].o is a valid 32-bit pointer
+      }
+    }
   }
 
   return fexldr_ptr_libwayland_client_wl_proxy_marshal_array_constructor_versioned(proxy, opcode, host_args.data(), interface, version);
@@ -207,6 +261,8 @@ fexfn_impl_libwayland_client_wl_proxy_marshal_array_constructor(
             const wl_interface *interface) {
   interface = lookup_wl_interface(interface);
 
+  fprintf(stderr, "WAYLAND HOST: Marshaling %s with proxy %p, using interface %p (%s) method %d (max: %d)\n", __FUNCTION__, proxy, interface, interface ? interface->name : "(null)", opcode, interface ? interface->method_count : 0);
+
   // NOTE: "interface" and "name" are the first members of their respective parent structs, so this is safe to read even on 32-bit
   if (((wl_proxy_private*)proxy)->interface->name == std::string_view { "wl_registry" }) {
     auto& host_interface = guest_to_host_interface[(void*)interface];
@@ -224,6 +280,7 @@ fexfn_impl_libwayland_client_wl_proxy_marshal_array_constructor(
       memcpy(host_interface, interface, sizeof(wl_interface));
 #endif
     }
+    fprintf(stderr, "HOST: wl_registry_bind for guest interface %s (%p -> %p)\n", interface->name, interface, host_interface);
   }
 
 #define WL_CLOSURE_MAX_ARGS 20
@@ -233,6 +290,24 @@ fexfn_impl_libwayland_client_wl_proxy_marshal_array_constructor(
     //       we need to make sure the upper 32-bits are explicitly zeroed
     std::memset(&host_args[i], 0, sizeof(host_args[i]));
     std::memcpy(&host_args[i], &args.get_pointer()[i], sizeof(args.get_pointer()[i]));
+  }
+
+  // Iterate over all arguments as described by the interface. If any of them are non-null, make sure to translate proxies/interfaces!
+  {
+    const wl_message* method = &(((wl_proxy_private*)proxy)->interface->methods[opcode]);
+    int arg_count = 0;
+    for (auto* ptr = method->signature; *ptr; ++ptr) {
+      if (isalpha(*ptr)) {
+        ++arg_count;
+      }
+    }
+
+    for (int arg_idx = 0; arg_idx < arg_count; ++arg_idx) {
+      if (method->types[arg_idx] != nullptr && host_args[arg_idx].o != nullptr) {
+        fprintf(stderr, "FOUND ARG %" PRIx64 " OF TYPE %s\n", (uint64_t)(uintptr_t)host_args[arg_idx].o, method->types[arg_idx]->name);
+        // TODO: Validate host_args[arg_idx].o is a valid 32-bit pointer
+      }
+    }
   }
 
   return fexldr_ptr_libwayland_client_wl_proxy_marshal_array_constructor(proxy, opcode, host_args.data(), interface);
@@ -246,6 +321,8 @@ fexfn_impl_libwayland_client_wl_proxy_marshal_array_flags(
             guest_layout<wl_argument*> args) {
   interface = lookup_wl_interface(interface);
 
+  fprintf(stderr, "WAYLAND HOST: Marshaling %s with proxy %p, using interface %p (%s) method %d (max: %d)\n", __FUNCTION__, proxy, interface, interface ? interface->name : "(null)", opcode, interface ? interface->method_count : 0);
+
   // NOTE: "interface" and "name" are the first members of their respective parent structs, so this is safe to read even on 32-bit
   if (((wl_proxy_private*)proxy)->interface->name == std::string_view { "wl_registry" }) {
     auto& host_interface = guest_to_host_interface[(void*)interface];
@@ -263,6 +340,7 @@ fexfn_impl_libwayland_client_wl_proxy_marshal_array_flags(
       memcpy(host_interface, interface, sizeof(wl_interface));
 #endif
     }
+    fprintf(stderr, "HOST: wl_registry_bind for guest interface %s (%p -> %p)\n", interface->name, interface, host_interface);
   }
 
 #define WL_CLOSURE_MAX_ARGS 20
@@ -272,6 +350,24 @@ fexfn_impl_libwayland_client_wl_proxy_marshal_array_flags(
     //       we need to make sure the upper 32-bits are explicitly zeroed
     std::memset(&host_args[i], 0, sizeof(host_args[i]));
     std::memcpy(&host_args[i], &args.get_pointer()[i], sizeof(args.get_pointer()[i]));
+  }
+
+  // Iterate over all arguments as described by the interface. If any of them are non-null, make sure to translate proxies/interfaces!
+  {
+    const wl_message* method = &(((wl_proxy_private*)proxy)->interface->methods[opcode]);
+    int arg_count = 0;
+    for (auto* ptr = method->signature; *ptr; ++ptr) {
+      if (isalpha(*ptr)) {
+        ++arg_count;
+      }
+    }
+
+    for (int arg_idx = 0; arg_idx < arg_count; ++arg_idx) {
+      if (method->types[arg_idx] != nullptr && host_args[arg_idx].o != nullptr) {
+        fprintf(stderr, "FOUND ARG %" PRIx64 " OF TYPE %s\n", (uint64_t)(uintptr_t)host_args[arg_idx].o, method->types[arg_idx]->name);
+        // TODO: Validate host_args[arg_idx].o is a valid 32-bit pointer
+      }
+    }
   }
 
   return fexldr_ptr_libwayland_client_wl_proxy_marshal_array_flags(proxy, opcode, interface, version, flags, host_args.data());
@@ -321,6 +417,7 @@ static void WaylandFinalizeHostTrampolineForGuestListener(void (*callback)()) {
 
 extern "C" int fexfn_impl_libwayland_client_wl_proxy_add_listener(struct wl_proxy *proxy,
       guest_layout<void (**)(void)> callback, void* data) {
+  fprintf(stderr, "WAYLAND HOST: %s with proxy %p, using interface %p (%s)\n", __FUNCTION__, proxy, ((wl_proxy_private*)proxy)->interface, ((wl_proxy_private*)proxy)->interface->name);
 
   auto guest_interface = lookup_wl_interface(((wl_proxy_private*)proxy)->interface);
 
@@ -328,7 +425,9 @@ extern "C" int fexfn_impl_libwayland_client_wl_proxy_add_listener(struct wl_prox
 //  auto callback2 = (uint32_t*)(uintptr_t)(uint32_t)(uintptr_t)callback;
   auto callback2 = (void(**)(void))callback.get_pointer();
 
+  fprintf(stderr, "  interface %s\n", guest_interface->name);
   for (int i = 0; i < guest_interface->event_count; ++i) {
+    fprintf(stderr, "  event %d: %s %s\n", i, guest_interface->events[i].name, guest_interface->events[i].signature);
     auto signature_view = std::string_view { guest_interface->events[i].signature };
 
     // A leading number indicates the minimum protocol version
@@ -339,7 +438,9 @@ extern "C" int fexfn_impl_libwayland_client_wl_proxy_add_listener(struct wl_prox
     // ? just indicates that the argument may be null, so it doesn't change the signature
     signature.erase(std::remove(signature.begin(), signature.end(), '?'), signature.end());
 
+//    auto callback = (uintptr_t)(uint32_t)(uintptr_t)callback2[i];
     auto callback = callback2[i];
+    fprintf(stderr, "CALLBACK: %p\n", callback);
 
     if (signature == "") {
       // E.g. xdg_toplevel::close
@@ -485,6 +586,7 @@ wl_interface* fexfn_impl_libwayland_client_fex_wl_exchange_interface_pointer(wl_
 
 #ifdef IS_32BIT_THUNK
   // TODO: Do wl_interface symbols from host get allocated in 32-bit memory space? At least add an assert for this!
+  fprintf(stderr, "wl_interface name: %p %s (should be 32-bit!)\n", host_interface->name, host_interface->name);
   memcpy(guest_interface, host_interface, 4); // name
   memcpy(reinterpret_cast<char*>(guest_interface) + 4, &host_interface->version, 4);
   memcpy(reinterpret_cast<char*>(guest_interface) + 8, &host_interface->method_count, 4);
@@ -535,8 +637,15 @@ static wl_interface* get_proxy_interface(wl_proxy* proxy) {
 }
 
 void fexfn_impl_libwayland_client_fex_wl_get_method_signature(wl_proxy* proxy, uint32_t opcode, char* out) {
+//fprintf(stderr, "%s: %p\n", __FUNCTION__, proxy);
+//fprintf(stderr, "%s: %p %s\n", __FUNCTION__, proxy, ((wl_proxy_private*)proxy)->interface->methods[opcode].signature);
+//fprintf(stderr, "%s: %p %s %p\n", __FUNCTION__, proxy, ((wl_proxy_private*)proxy)->interface->methods[opcode].signature, out);
   // TODO: Assert proxy comes from the host library
+//  strcpy(out, ((wl_proxy_private*)proxy)->interface->methods[opcode].signature);
+
   strcpy(out, get_proxy_interface(proxy)->methods[opcode].signature);
+
+//fprintf(stderr, "-> %s\n", out);
 }
 
 int fexfn_impl_libwayland_client_fex_wl_get_interface_event_count(wl_proxy* proxy) {

@@ -263,7 +263,13 @@ void GenerateThunkLibsAction::OnAnalysisComplete(clang::ASTContext& context) {
             file << "  struct __attribute__((packed)) {\n";
             for (std::size_t idx = 0; idx < data.param_types.size(); ++idx) {
                 auto& type = data.param_types[idx];
-                file << "    " << format_decl(type.getUnqualifiedType(), fmt::format("a_{}", idx)) << ";\n";
+                auto cb = data.callbacks.find(idx);
+                if (cb == data.callbacks.end() || cb->second.is_stub) {
+                    file << "    " << format_decl(type.getUnqualifiedType(), fmt::format("a_{}", idx)) << ";\n";
+                } else {
+                    // Guest function pointer is wrapped in a host-callable trampoline (referred to by address)
+                    fmt::print(file, "    uintptr_t a_{};\n", idx);
+                }
             }
             if (!is_void) {
                 file << "    " << format_decl(data.return_type, "rv") << ";\n";
@@ -281,7 +287,7 @@ void GenerateThunkLibsAction::OnAnalysisComplete(clang::ASTContext& context) {
                     file << "a_" << idx << ";\n";
                 } else {
                     // Before passing guest function pointers to the host, wrap them in a host-callable trampoline
-                    fmt::print(file, "AllocateHostTrampolineForGuestFunction(a_{});\n", idx);
+                    fmt::print(file, "(uintptr_t)AllocateHostTrampolineForGuestFunction(a_{});\n", idx);
                 }
             }
             file << "  fexthunks_" << libname << "_" << function_name << "(&args);\n";
@@ -365,6 +371,7 @@ void GenerateThunkLibsAction::OnAnalysisComplete(clang::ASTContext& context) {
             }
 
             if (type->isEnumeralType()) {
+            fprintf(stderr, "gen.cpp: Processing type %s %d\n", clang::QualType { type, 0 }.getAsString().c_str(), __LINE__);
                 fmt::print(file, "template<>\nstruct __attribute__((packed)) guest_layout<{}> {{\n", struct_name);
                 fmt::print(file, "  using type = {}int{}_t;\n",
                            type->isUnsignedIntegerOrEnumerationType() ? "u" : "",
@@ -407,13 +414,10 @@ void GenerateThunkLibsAction::OnAnalysisComplete(clang::ASTContext& context) {
             fmt::print(file, "  using type = {};\n", struct_name);
             fmt::print(file, "  type data;\n");
             fmt::print(file, "\n");
-            fmt::print(file, "  host_layout(const guest_layout<{}>& from) ", struct_name);
+            fmt::print(file, "  host_layout(const guest_layout<{}>& from) :\n", struct_name);
             if (type_compat.at(type) == TypeCompatibility::Full) {
-                fmt::print(file, ":\n");
                 fmt::print(file, "    data {{ from.data }} {{\n");
-                fmt::print(file, "  }}\n");
-            } else if (type_compat.at(type) == TypeCompatibility::Repackable || type_repack_info.emit_layout_wrappers) {
-                fmt::print(file, ":\n");
+            } else {
                 fmt::print(file, "    data {{\n");
                 fmt::print(file, "      // Constructor performs layout repacking.\n");
                 fmt::print(file, "      // Each initializer itself is wrapped in host_layout<> to enable recursive layout repacking\n");
@@ -451,24 +455,22 @@ void GenerateThunkLibsAction::OnAnalysisComplete(clang::ASTContext& context) {
                       // Leave field uninitialized
                     }
                 }
-                fmt::print(file, "  }}\n");
-            } else {
-                fmt::print(file, "= delete;\n");
             }
+            fmt::print(file, "  }}\n");
+//            fmt::print(file, "\n");
+//            fmt::print(file, "  host_layout() = default;\n"); // TODO: Remove in favor of a static member function?
             fmt::print(file, "}};\n\n");
 
             fmt::print(file, "// Constructor performs layout repacking.\n");
             fmt::print(file, "// Each initializer itself is wrapped in host_layout<> to enable recursive layout repacking\n");
-            fmt::print(file, "inline guest_layout<{}> to_guest(const host_layout<{}>& from) ", struct_name, struct_name);
+            fmt::print(file, "inline guest_layout<{}> to_guest(const host_layout<{}>& from) {{\n", struct_name, struct_name);
             if (type_compat.at(type) == TypeCompatibility::Full) {
-                fmt::print(file, "{{\n");
                 fmt::print(file, "  guest_layout<{}> ret;\n", struct_name);
                 fmt::print(file, "  static_assert(sizeof(from) == sizeof(ret));\n");
+                // TODO: Fails to compile?
+//                fmt::print(file, "  static_assert(alignof(decltype(from)) == alignof(decltype(ret)));\n");
                 fmt::print(file, "  memcpy(&ret, &from, sizeof(from));\n");
-                fmt::print(file, "  return ret;\n");
-                fmt::print(file, "}}\n\n");
-            } else if (type_compat.at(type) == TypeCompatibility::Repackable || type_repack_info.emit_layout_wrappers) {
-                fmt::print(file, "{{\n");
+            } else {
                 fmt::print(file, "  guest_layout<{}> ret {{ .data {{\n", struct_name);
                 auto map_field2 = [&file](const StructInfo::MemberInfo& member, bool skip_arrays) {
                     if (member.member_name.starts_with("pfn")) {
@@ -505,15 +507,16 @@ void GenerateThunkLibsAction::OnAnalysisComplete(clang::ASTContext& context) {
                       // Leave field uninitialized
                     }
                 }
-                fmt::print(file, "  return ret;\n");
-                fmt::print(file, "}}\n\n");
-            } else {
-                fmt::print(file, "= delete;\n\n");
             }
+            fmt::print(file, "  return ret;\n");
+            fmt::print(file, "}}\n\n");
 
             // Forward-declare user-provided repacking functions
             for (const auto& member_name : type_repack_info.custom_repacked_members) {
                 fmt::print(file, "template<>\n");
+//                fmt::print(file, "typename pmd_traits<decltype(&{}::{})>::member_t\n", struct_name, member_name);
+//                fmt::print(file, "fex_custom_repack<&{}::{}>(const typename pmd_traits<decltype(&{}::{})>::member_t& from);\n",
+//                           struct_name, member_name, struct_name, member_name);
                 fmt::print(file, "void fex_custom_repack<&{}::{}>(host_layout<{}>& into, const guest_layout<{}>& from);\n",
                            struct_name, member_name, struct_name, struct_name);
                 fmt::print(file, "template<>\n");
@@ -525,6 +528,7 @@ void GenerateThunkLibsAction::OnAnalysisComplete(clang::ASTContext& context) {
             // TODO: Generate wrappers to call all custom repack functions for children
             fmt::print(file, "void fex_apply_custom_repacking(host_layout<{}>& source, const guest_layout<{}>& from) {{\n", struct_name, struct_name);
             for (const auto& member_name : type_repack_info.custom_repacked_members) {
+//                fmt::print(file, "  source.data.{} = fex_custom_repack<&{}::{}>(source, from);\n",
                 fmt::print(file, "  fex_custom_repack<&{}::{}>(source, from);\n",
                            /*member_name, */struct_name, member_name);
             }
@@ -639,6 +643,16 @@ void GenerateThunkLibsAction::OnAnalysisComplete(clang::ASTContext& context) {
                 function_to_call = "fexfn_impl_" + libname + "_" + function_name;
             }
 
+            auto get_type_name_with_nonconst_pointee = [&](clang::QualType type) {
+                type = type.getLocalUnqualifiedType();
+                if (type->isPointerType()) {
+                    // Strip away "const" from pointee type
+                    type = context.getPointerType(type->getPointeeType().getLocalUnqualifiedType());
+                }
+                return get_type_name(context, type.getTypePtr());
+            };
+
+
             file << "static void fexfn_unpack_" << libname << "_" << function_name << "(" << struct_name << "* args) {\n";
 
             for (unsigned param_idx = 0; param_idx != thunk.param_types.size(); ++param_idx) {
@@ -671,14 +685,6 @@ void GenerateThunkLibsAction::OnAnalysisComplete(clang::ASTContext& context) {
                 } else if (pointee_compat == TypeCompatibility::Repackable) {
                     // TODO: Require opt-in for this to be emitted since it's single-element only; otherwise, pointers-to-arrays arguments will cause stack trampling
                     // TODO: Rename to repacked_arg
-                    auto get_type_name_with_nonconst_pointee = [&](clang::QualType type) {
-                        type = type.getLocalUnqualifiedType();
-                        if (type->isPointerType()) {
-                            // Strip away "const" from pointee type
-                            type = context.getPointerType(type->getPointeeType().getLocalUnqualifiedType());
-                        }
-                        return get_type_name(context, type.getTypePtr());
-                    };
                     fmt::print(file, "  unpacked_arg_with_storage<{}> a_{} {{ args->a_{} }};\n", get_type_name_with_nonconst_pointee(param_type), param_idx, param_idx);
                 } else {
                     throw report_error(thunk.decl->getLocation(), "Cannot generate unpacking function for function %0 with unannotated pointer parameter %1").AddString(function_name).AddTaggedVal(param_type);
@@ -702,6 +708,8 @@ void GenerateThunkLibsAction::OnAnalysisComplete(clang::ASTContext& context) {
             fmt::print(file, "{}(", function_to_call);
             {
                 auto format_param = [&](std::size_t idx) {
+                    std::string raw_arg = fmt::format("a_{}.get()", idx);
+
                     auto cb = thunk.callbacks.find(idx);
                     if (cb != thunk.callbacks.end() && cb->second.is_stub) {
                         return "fexfn_unpack_" + get_callback_name(function_name, cb->first) + "_stub";
@@ -712,7 +720,7 @@ void GenerateThunkLibsAction::OnAnalysisComplete(clang::ASTContext& context) {
                         if (thunk.custom_host_impl) {
                             return fmt::format("(FinalizeHostTrampolineForGuestFunction({}), {})", arg_name, arg_name);
                         } else {
-                            return fmt::format("(FinalizeHostTrampolineForGuestFunction({}), ({})(uint64_t {{ {}.data }}))", arg_name, get_type_name(context, thunk.param_types[idx].getTypePtr()), arg_name);
+                            return fmt::format("(FinalizeHostTrampolineForGuestFunction({}), ({})(uint64_t {{ {}.data }}))", arg_name, get_type_name_with_nonconst_pointee(thunk.param_types[idx]), arg_name);
                         }
                     } else if (thunk.param_annotations[idx].is_passthrough) {
                         // Pass raw guest_layout<T*>
@@ -773,6 +781,7 @@ void GenerateThunkLibsAction::OnAnalysisComplete(clang::ASTContext& context) {
         //       e.g. due to differing sizes or due to data layout differences.
         //       Hence, two separate parameter lists are managed here.
         for (auto& host_funcptr_entry : thunked_funcptrs) {
+            // TODO: Mostly duplicated from AnalyzeDataLayoutAction::EmitOutput
             auto& [type, param_annotations] = host_funcptr_entry.second;
             auto func_type = type->getAs<clang::FunctionProtoType>();
             std::string mangled_name = clang::QualType { type, 0 }.getAsString();

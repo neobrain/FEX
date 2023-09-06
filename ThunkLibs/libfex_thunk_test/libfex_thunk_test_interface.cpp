@@ -35,3 +35,15 @@ template<> struct fex_gen_config<&CustomRepackedType::data> : fexgen::custom_rep
 template<> struct fex_gen_config<RanCustomRepack> {};
 
 template<> struct fex_gen_config<FunctionWithDivergentSignature> {};
+
+//void SetAsyncCallback(void(*)());
+//template<> struct fex_gen_config<SetAsyncCallback> : fexgen::custom_host_impl, fexgen::custom_guest_entrypoint {};
+
+// TODO: Only needs to be customized on 32-bit
+template<> struct fex_gen_config<&TestStruct1::Next> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&TestStruct2::Next> : fexgen::custom_repack {};
+
+template<> struct fex_gen_type<TestHandle> : fexgen::opaque_type {};
+
+template<> struct fex_gen_config<TestFunction> : fexgen::custom_guest_entrypoint, fexgen::custom_host_impl {};
+template<> struct fex_gen_config<TestFunction2> {};

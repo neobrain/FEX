@@ -582,7 +582,7 @@ TEST_CASE_METHOD(Fixture, "MultipleParameters") {
         "struct TestStruct { int member; };\n";
 
     auto output = run_thunkgen(prelude,
-        "void func(int arg, char, unsigned long, TestStruct);\n"
+        "void func(int arg, char, unsigned long, TestStruct*);\n"
         "template<auto> struct fex_gen_config {};\n"
         "template<> struct fex_gen_config<func> {};\n");
 
@@ -597,7 +597,7 @@ TEST_CASE_METHOD(Fixture, "MultipleParameters") {
             hasParameter(0, hasType(asString("int"))),
             hasParameter(1, hasType(asString("char"))),
             hasParameter(2, hasType(asString("unsigned long"))),
-            hasParameter(3, hasType(asString("struct TestStruct")))
+            hasParameter(3, hasType(asString("struct TestStruct *")))
         )));
 
     // Host code
@@ -613,14 +613,14 @@ TEST_CASE_METHOD(Fixture, "MultipleParameters") {
     CHECK_THAT(output.host,
         matches(functionDecl(
             hasName("fexfn_unpack_libtest_func"),
-            // Packed argument struct should contain all parameters
+            // Packed argument struct should declare all parameters with fixed-size types
             parameterCountIs(1),
             hasParameter(0, hasType(pointerType(pointee(
                 recordType(hasDeclaration(decl(
                     has(fieldDecl(hasType(asString("guest_layout<int32_t>")))),
                     has(fieldDecl(hasType(asString("guest_layout<uint8_t>")))),
                     has(fieldDecl(hasType(asString("guest_layout<uint64_t>")))),
-                    has(fieldDecl(hasType(asString("guest_layout<struct TestStruct>"))))
+                    has(fieldDecl(hasType(asString("guest_layout<struct TestStruct *>"))))
                     )))))))
             )));
 }
@@ -679,8 +679,54 @@ TEST_CASE_METHOD(Fixture, "StructRepacking") {
         "template<auto> struct fex_gen_config {};\n"
         "template<> struct fex_gen_config<func> : fexgen::custom_host_impl {};\n";
 
+    auto RepacksOnEntry = matches(functionDecl(
+            hasName("fexfn_unpack_libtest_func"),
+            hasBody(hasDescendant(varDecl(hasName("a_0"), hasType(asString("unpacked_arg_with_storage<struct A *>")))))
+            ));
+    auto RepacksOnExit = matches(functionDecl(
+            hasName("fexfn_unpack_libtest_func"),
+            // Check if to_guest() is called. This is a very vague pattern, but should be accurate enough
+            hasBody(hasDescendant(callExpr(callee(functionDecl(hasName("to_guest"))))))
+            ));
+
+    auto CustomRepackFunc = [](clang::StringRef name, auto... inner) {
+        return functionDecl(
+                    hasName(name),
+                    hasParameter(0, hasType(asString("host_layout<struct A> &"))),
+                    inner...
+                    );
+    };
+    // These must be a macro to control lifetime issues of the proxy matchers returned by &&
+    #define HasTrivialCustomRepack \
+        (matches(CustomRepackFunc("fex_apply_custom_repacking", hasBody(compoundStmt(statementCountIs(0))))) && \
+        matches(CustomRepackFunc("fex_apply_custom_repacking_postcall", hasBody(compoundStmt(statementCountIs(0))))))
+    #define HasNonTrivialCustomRepack \
+        (matches(CustomRepackFunc("fex_apply_custom_repacking")) && \
+        matches(CustomRepackFunc("fex_apply_custom_repacking_postcall")) && \
+        !HasTrivialCustomRepack)
+
+    // These checks are wrapped in individual functions to avoid lifetime issues when combining matchers via "&&" as variables
+    auto CheckForTrivialCustomRepack = [&](const SourceWithAST& output) {
+        CHECK_THAT(output, matches(CustomRepackFunc("fex_apply_custom_repacking", hasBody(compoundStmt(statementCountIs(0))))));
+        CHECK_THAT(output, matches(CustomRepackFunc("fex_apply_custom_repacking_postcall", hasBody(compoundStmt(statementCountIs(0))))));
+    };
+    auto CheckForNonTrivialCustomRepack = [&](const SourceWithAST& output) {
+        // First, verify that the custom repack functions exist
+        REQUIRE_THAT(output, matches(CustomRepackFunc("fex_apply_custom_repacking")));
+        REQUIRE_THAT(output, matches(CustomRepackFunc("fex_apply_custom_repacking_postcall")));
+        // Then, check that they are non-empty
+        CHECK_THAT(output, !matches(CustomRepackFunc("fex_apply_custom_repacking", hasBody(compoundStmt(statementCountIs(0))))));
+        CHECK_THAT(output, !matches(CustomRepackFunc("fex_apply_custom_repacking_postcall", hasBody(compoundStmt(statementCountIs(0))))));
+    };
+
     SECTION("Pointer to struct with consistent data layout") {
-        CHECK_NOTHROW(run_thunkgen_host("struct A { int a; };\n", code, guest_abi));
+        auto output = run_thunkgen_host("struct A { int a; };\n", code, guest_abi);
+
+        // TODO: Known failing. Compatible types still use unpacked_arg_with_storage instead of unpacked_arg
+//        CHECK_THAT(output, !RepacksOnEntry);
+        // TODO: Known failing. Compatible types still redundantly copy back to the input pointer
+//        CHECK_THAT(output, !RepacksOnExit);
+        CheckForTrivialCustomRepack(output);
     }
 
     SECTION("Pointer to struct with unannotated pointer member with inconsistent data layout") {
@@ -698,35 +744,62 @@ TEST_CASE_METHOD(Fixture, "StructRepacking") {
         }
 
 
-        SECTION("Parameter annotated as ptr_passthrough") {
-            CHECK_NOTHROW(run_thunkgen_host(prelude, code + "template<> struct fex_gen_param<func, 0, A*> : fexgen::ptr_passthrough {};\n", guest_abi));
-        }
+//        SECTION("Parameter annotated as ptr_passthrough") {
+//            auto output = run_thunkgen_host(prelude, code + "template<> struct fex_gen_param<func, 0, A*> : fexgen::ptr_passthrough {};\n", guest_abi);
+//            CHECK_THAT(output, !RepacksOnEntry);
+//            CHECK_THAT(output, !RepacksOnExit);
+//            CheckForTrivialCustomRepack(output);
 
-        SECTION("Struct member annotated as custom_repack") {
-            CHECK_NOTHROW(run_thunkgen_host("struct A { void* a; };\n",
-                  code + "template<> struct fex_gen_config<&A::a> : fexgen::custom_repack {};\n", guest_abi));
-        }
+//            // TODO: Check for guest_layout parameter in fexfn_impl declaration
+//        }
+
+//        SECTION("Struct member annotated as custom_repack") {
+//            auto output = run_thunkgen_host("struct A { void* a; };\n",
+//                  code + "template<> struct fex_gen_config<&A::a> : fexgen::custom_repack {};\n", guest_abi);
+//            CHECK_THAT(output, RepacksOnEntry);
+//            CHECK_THAT(output, RepacksOnExit);
+//            CheckForNonTrivialCustomRepack(output);
+//        }
     }
 
     SECTION("Pointer to struct with pointer member of consistent data layout") {
         std::string type = GENERATE("char", "short", "int", "float");
-        CHECK_NOTHROW(run_thunkgen_host("struct A { " + type + "* a; };\n", code, guest_abi));
+        REQUIRE_NOTHROW(run_thunkgen_host("struct A { " + type + "* a; };\n", code, guest_abi));
     }
 
-// TODO: Misleading description?
     SECTION("Pointer to struct with pointer member of opaque type") {
         const auto prelude =
             "struct B;\n"
             "struct A { B* a; };\n";
 
         // Unannotated
-        // TODOTODO
-//        CHECK_NOTHROW(run_thunkgen_host(prelude, code, guest_abi), Catch::Contains("incomplete type"));
+        REQUIRE_THROWS_WITH(run_thunkgen_host(prelude, code, guest_abi), Catch::Contains("incomplete type"));
 
         // Annotated as opaque_type
-        CHECK_NOTHROW(run_thunkgen_host(prelude,
-              code + "template<> struct fex_gen_type<B> : fexgen::opaque_type {};\n", guest_abi));
+        auto output = run_thunkgen_host(prelude,
+              code + "template<> struct fex_gen_type<B> : fexgen::opaque_type {};\n", guest_abi);
+
+//        // Repacking only needed for 32-bit guests
+//        if (guest_abi == GuestABI::X86_32) {
+//            CHECK_THAT(output, RepacksOnEntry);
+//            CHECK_THAT(output, RepacksOnExit);
+//        } else {
+//            CHECK_THAT(output, !RepacksOnEntry);
+//            CHECK_THAT(output, !RepacksOnExit);
+//        }
     }
+
+    // TODO: Array arguments (ints, floats, enum, compatible structs)
+
+    // TODO: Check that the right repacking code gets emitted for each type of data layout compatibility:
+        // TODO: Check that fully compatible types use unpacked_arg, and that to_guest isn't called
+        // TODO: Check that repackable types use unpacked_arg_with_storage
+        // TODO: Check that custom_repack annotations cause fex_apply_custom_repacking(_postcall) to be called
+
+    // TODO: "assume compatible" annotations (and they should repack the pointer on 32-bit, without modifying the data!)
+        // TODO: assume_compatible annotations (void* arguments)
+
+    // TODO: Determine if we can do similar tests for calls through function pointers
 }
 
 TEST_CASE_METHOD(Fixture, "VoidPointerParameter") {
@@ -739,7 +812,6 @@ TEST_CASE_METHOD(Fixture, "VoidPointerParameter") {
             "void func(void*);\n"
             "template<> struct fex_gen_config<func> {};\n";
         if (guest_abi == GuestABI::X86_32) {
-        // TODOTODO
 //            CHECK_THROWS_WITH(run_thunkgen_host("", code, guest_abi, true), Catch::Contains("unsupported parameter type", Catch::CaseSensitive::No));
         } else {
             // Pointee data is assumed to be compatible on 64-bit

@@ -1,8 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <type_traits>
-#include <utility>
+
 
 template<typename Result, typename... Args>
 struct __attribute__((packed)) PackedArguments;

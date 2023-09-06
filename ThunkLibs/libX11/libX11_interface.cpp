@@ -49,7 +49,8 @@ template<> struct fex_gen_type<void(_XDisplay*, XID*, int)> {}; // XDisplay::idl
 typedef void (*XIOErrorExitHandler)(Display*, void*);
 #endif
 
-template<> struct fex_gen_type<std::remove_pointer_t<XIOErrorExitHandler>> {}; // XDisplay::exit_handler
+// TODO: Needs function annotation support for void* parameter in function pointer parameter
+//template<> struct fex_gen_type<std::remove_pointer_t<XIOErrorExitHandler>> {}; // XDisplay::exit_handler
 
 template<> struct fex_gen_type<Bool(Display*, xReply*, char*, int, XPointer)> {}; // XDisplay::async_handlers->handler
 
@@ -159,6 +160,7 @@ template<> struct fex_gen_config<_XPollfdCacheDel> {};
 template<> struct fex_gen_config<_XAllocID> {};
 template<> struct fex_gen_config<_XAllocIDs> {};
 template<> struct fex_gen_config<_XFreeExtData> {};
+// TODO: Better function pointer handling
 template<> struct fex_gen_config<XESetCreateGC> : fexgen::returns_guest_pointer {};
 template<> struct fex_gen_config<XESetCopyGC> : fexgen::returns_guest_pointer {};
 template<> struct fex_gen_config<XESetFlushGC> : fexgen::returns_guest_pointer {};
@@ -171,7 +173,8 @@ template<> struct fex_gen_config<XESetCloseDisplay> : fexgen::returns_guest_poin
 template<> struct fex_gen_config<XESetError> : fexgen::returns_guest_pointer {};
 template<> struct fex_gen_config<XESetErrorString> : fexgen::returns_guest_pointer {};
 
-template<> struct fex_gen_config<XESetPrintErrorValues> : fexgen::returns_guest_pointer {};
+// TODO: Function pointer argument takes void pointer
+template<> struct fex_gen_config<XESetPrintErrorValues> : fexgen::returns_guest_pointer, fexgen::custom_host_impl {};
 template<> struct fex_gen_config<XESetWireToEvent> : fexgen::returns_guest_pointer {};
 template<> struct fex_gen_config<XESetWireToEventCookie> : fexgen::returns_guest_pointer {};
 template<> struct fex_gen_config<XESetCopyEventCookie> : fexgen::returns_guest_pointer {};

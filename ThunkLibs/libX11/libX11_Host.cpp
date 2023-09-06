@@ -2227,4 +2227,9 @@ Status fexfn_impl_libX11__XReply(Display* display, xReply* reply, int extra, Boo
   return fexldr_ptr_libX11__XReply(display, reply, extra, discard);
 }
 
+// thunkgen can't handle void* arguments in function pointer arguments yet, so manually marshall this pointer to the host library
+auto fexfn_impl_libX11_XESetPrintErrorValues(Display * a_0, int a_1, guest_layout<void (*)(Display *, XErrorEvent *, void *)> a_2) -> void (*)(Display *, XErrorEvent *, void *) {
+  return fexldr_ptr_libX11_XESetPrintErrorValues(a_0, a_1, (void (*)(Display *, XErrorEvent *, void *))(uintptr_t { a_2.data }));
+}
+
 EXPORTS(libX11)

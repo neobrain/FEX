@@ -26,6 +26,21 @@ $end_info$
 
 #include "thunkgen_guest_libxcb.inl"
 
+struct OnStart {
+  std::thread thr;
+
+  OnStart() : thr([this]() {
+    struct { unsigned id = 1; } args;
+    fexthunks_fex_register_async_worker_thread(&args);
+  }) {}
+
+  ~OnStart() {
+    struct { unsigned id = 1; } args;
+    fexthunks_fex_unregister_async_worker_thread(&args);
+    thr.join();
+  }
+} on_start;
+
 extern "C" {
   xcb_extension_t xcb_big_requests_id = {
     .name = "BIG-REQUESTS",

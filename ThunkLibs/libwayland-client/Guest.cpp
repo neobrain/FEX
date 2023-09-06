@@ -41,9 +41,26 @@ extern "C" const wl_interface wl_callback_interface {};
 
 #include <stdarg.h>
 
+#include <thread>
+
 #include <sys/mman.h>
 
 #include "thunkgen_guest_libwayland-client.inl"
+
+struct OnStart {
+  std::thread thr;
+
+  OnStart() : thr([]() {
+    struct { unsigned id = 1; } args;
+    fexthunks_fex_register_async_worker_thread(&args);
+  }) {}
+
+  ~OnStart() {
+    struct { unsigned id = 1; } args;
+    fexthunks_fex_unregister_async_worker_thread(&args);
+    thr.join();
+  }
+} on_start;
 
 // See wayland-util.h for documentation on protocol message signatures
 template<char> struct ArgType;
@@ -67,15 +84,24 @@ static uint64_t WaylandAllocateHostTrampolineForGuestListener(void (*callback)()
 extern "C" int wl_proxy_add_listener(wl_proxy *proxy,
       void (**callback)(void), void *data) {
 
+  fprintf(stderr, "WAYLAND GUEST: %s with proxy %p, using interface %p (%s)\n", __FUNCTION__, proxy, /*interface*/ nullptr, /*interface ? interface->name : "null"*/ "unknown_32bit");
+
   // NOTE: This pointer must remain valid past the return of this function.
   // TODO: What's a good way to manage the lifetime of this?
   auto& host_callbacks = *new std::array<uint64_t, WL_CLOSURE_MAX_ARGS>;
 
+//  for (int i = 0; i < ((wl_proxy_private*)proxy)->interface->method_count; ++i) {
+//    fprintf(stderr, "  method %d: %s %s\n", i, interface->methods[i].name, interface->methods[i].signature);
+//    auto signature = std::string_view { interface->methods[i].signature };
+//  }
 
 // TODO: Fixup for 32-bit...
   for (int i = 0; i < fex_wl_get_interface_event_count(proxy); ++i) {
+    char event_name[64];
     char event_signature[16];
+    fex_wl_get_interface_event_name(proxy, i, event_name);
     fex_wl_get_interface_event_signature(proxy, i, event_signature);
+    fprintf(stderr, "  event %d: %s %s\n", i, event_name, event_signature);
     auto signature2 = std::string_view { event_signature };
 
     // A leading number indicates the minimum protocol version
@@ -274,33 +300,51 @@ extern "C" void wl_proxy_marshal(wl_proxy *proxy, uint32_t opcode, ...) {
 
 extern "C" wl_proxy *wl_proxy_marshal_constructor(wl_proxy *proxy, uint32_t opcode,
            const wl_interface *interface, ...) {
+//  fprintf(stderr, "WAYLAND GUEST: %s with proxy %p, using interface %s\n", __FUNCTION__, proxy, ((wl_proxy_private*)proxy)->interface->name);
+  fprintf(stderr, "WAYLAND GUEST: %s with proxy %p, using interface\n", __FUNCTION__, proxy);
+
   wl_argument args[WL_CLOSURE_MAX_ARGS];
   va_list ap;
 
   va_start(ap, interface);
   // This is equivalent to reading ((wl_proxy_private*)proxy)->interface->methods[opcode].signature on 64-bit.
   // On 32-bit, the data layout differs between host and guest however, so we let the host extract the data.
+  fprintf(stderr, "WAYLAND GUEST: %s:%d\n", __FUNCTION__, __LINE__);
   char signature[64];
   fex_wl_get_method_signature(proxy, opcode, signature);
+  fprintf(stderr, "WAYLAND GUEST: %s:%d\n", __FUNCTION__, __LINE__);
+//  wl_argument_from_va_list(((wl_proxy_private*)proxy)->interface->methods[opcode].signature,
+//                           args, WL_CLOSURE_MAX_ARGS, ap);
   wl_argument_from_va_list(signature, args, WL_CLOSURE_MAX_ARGS, ap);
+  fprintf(stderr, "WAYLAND GUEST: %s:%d\n", __FUNCTION__, __LINE__);
   va_end(ap);
 
+  fprintf(stderr, "WAYLAND GUEST: %s:%d\n", __FUNCTION__, __LINE__);
   return wl_proxy_marshal_array_constructor(proxy, opcode, args, interface);
 }
 
 extern "C" wl_proxy *wl_proxy_marshal_constructor_versioned(wl_proxy *proxy, uint32_t opcode,
            const wl_interface *interface, uint32_t version, ...) {
+//  fprintf(stderr, "WAYLAND GUEST: %s with proxy %p, using interface %s\n", __FUNCTION__, proxy, ((wl_proxy_private*)proxy)->interface->name);
+  fprintf(stderr, "WAYLAND GUEST: %s with proxy %p, using interface\n", __FUNCTION__, proxy);
+
   wl_argument args[WL_CLOSURE_MAX_ARGS];
   va_list ap;
 
   va_start(ap, version);
   // This is equivalent to reading ((wl_proxy_private*)proxy)->interface->methods[opcode].signature on 64-bit.
   // On 32-bit, the data layout differs between host and guest however, so we let the host extract the data.
+  fprintf(stderr, "WAYLAND GUEST: %s:%d\n", __FUNCTION__, __LINE__);
   char signature[64];
   fex_wl_get_method_signature(proxy, opcode, signature);
+  fprintf(stderr, "WAYLAND GUEST: %s:%d\n", __FUNCTION__, __LINE__);
+//  wl_argument_from_va_list(((wl_proxy_private*)proxy)->interface->methods[opcode].signature,
+//                           args, WL_CLOSURE_MAX_ARGS, ap);
   wl_argument_from_va_list(signature, args, WL_CLOSURE_MAX_ARGS, ap);
+  fprintf(stderr, "WAYLAND GUEST: %s:%d\n", __FUNCTION__, __LINE__);
   va_end(ap);
 
+  fprintf(stderr, "WAYLAND GUEST: %s:%d\n", __FUNCTION__, __LINE__);
   return wl_proxy_marshal_array_constructor_versioned(proxy, opcode, args, interface, version);
 }
 
@@ -308,17 +352,26 @@ extern "C" wl_proxy *wl_proxy_marshal_flags(wl_proxy *proxy, uint32_t opcode,
            const wl_interface *interface,
            uint32_t version,
            uint32_t flags, ...) {
+//  fprintf(stderr, "WAYLAND GUEST: %s with proxy %p, using interface %s\n", __FUNCTION__, proxy, ((wl_proxy_private*)proxy)->interface->name);
+  fprintf(stderr, "WAYLAND GUEST: %s with proxy %p, using interface\n", __FUNCTION__, proxy);
+
   wl_argument args[WL_CLOSURE_MAX_ARGS];
   va_list ap;
 
   va_start(ap, flags);
   // This is equivalent to reading ((wl_proxy_private*)proxy)->interface->methods[opcode].signature on 64-bit.
   // On 32-bit, the data layout differs between host and guest however, so we let the host extract the data.
+  fprintf(stderr, "WAYLAND GUEST: %s:%d\n", __FUNCTION__, __LINE__);
   char signature[64];
   fex_wl_get_method_signature(proxy, opcode, signature);
+  fprintf(stderr, "WAYLAND GUEST: %s:%d\n", __FUNCTION__, __LINE__);
+//  wl_argument_from_va_list(((wl_proxy_private*)proxy)->interface->methods[opcode].signature,
+//                           args, WL_CLOSURE_MAX_ARGS, ap);
   wl_argument_from_va_list(signature, args, WL_CLOSURE_MAX_ARGS, ap);
+  fprintf(stderr, "WAYLAND GUEST: %s:%d\n", __FUNCTION__, __LINE__);
   va_end(ap);
 
+  fprintf(stderr, "WAYLAND GUEST: %s:%d\n", __FUNCTION__, __LINE__);
   return wl_proxy_marshal_array_flags(proxy, opcode, interface, version, flags, args);
 }
 
@@ -339,6 +392,17 @@ void OnInit() {
   fex_wl_exchange_interface_pointer(const_cast<wl_interface*>(&wl_surface_interface), "wl_surface");
   fex_wl_exchange_interface_pointer(const_cast<wl_interface*>(&wl_keyboard_interface), "wl_keyboard");
   fex_wl_exchange_interface_pointer(const_cast<wl_interface*>(&wl_callback_interface), "wl_callback");
+
+  fprintf(stderr, "Proxy wl_output_interface: %p\n", (void*)&wl_output_interface);
+  fprintf(stderr, "Proxy wl_surface_interface: %p\n", (void*)&wl_surface_interface);
+  fprintf(stderr, "Proxy wl_shm_pool_interface: %p\n", (void*)&wl_shm_pool_interface);
+  fprintf(stderr, "Proxy wl_pointer_interface: %p\n", (void*)&wl_pointer_interface);
+  fprintf(stderr, "Proxy wl_compositor_interface: %p\n", (void*)&wl_compositor_interface);
+  fprintf(stderr, "Proxy wl_shm_interface: %p\n", (void*)&wl_shm_interface);
+  fprintf(stderr, "Proxy wl_registry_interface: %p\n", (void*)&wl_registry_interface);
+  fprintf(stderr, "Proxy wl_buffer_interface: %p\n", (void*)&wl_buffer_interface);
+  fprintf(stderr, "Proxy wl_seat_interface: %p\n", (void*)&wl_seat_interface);
+
 }
 
 LOAD_LIB_INIT(libwayland-client, OnInit)

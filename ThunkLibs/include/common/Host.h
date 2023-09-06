@@ -11,6 +11,7 @@ $end_info$
 #include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
+#include <limits>
 
 #include "PackedArguments.h"
 
@@ -94,6 +95,31 @@ struct ParameterAnnotations {
     bool assume_compatible = false;
 };
 
+template<typename>
+struct CallbackUnpack;
+
+template<typename FuncType>
+void MakeHostTrampolineForGuestFunctionAt(uintptr_t GuestTarget, uintptr_t GuestUnpacker, FuncType **Func) {
+    *Func = (FuncType*)FEXCore::MakeHostTrampolineForGuestFunction(
+        (void*)&CallbackUnpack<FuncType>::CallGuestPtr,
+        GuestTarget,
+        GuestUnpacker);
+}
+
+template<typename F>
+void FinalizeHostTrampolineForGuestFunction(F* PreallocatedTrampolineForGuestFunction) {
+  FEXCore::FinalizeHostTrampolineForGuestFunction(
+      (FEXCore::HostToGuestTrampolinePtr*)PreallocatedTrampolineForGuestFunction,
+      (void*)&CallbackUnpack<F>::CallGuestPtr);
+}
+
+template<typename F>
+void MakeHostTrampolineForGuestFunctionAsyncCallable(F* PreallocatedTrampolineForGuestFunction, unsigned AsyncWorkerThreadId) {
+  FEXCore::MakeHostTrampolineForGuestFunctionAsyncCallable(
+      (FEXCore::HostToGuestTrampolinePtr*)PreallocatedTrampolineForGuestFunction,
+      AsyncWorkerThreadId);
+}
+
 // Generator emits specializations for this for each type that has compatible layout
 template<typename T>
 inline constexpr bool has_compatible_data_layout =
@@ -151,6 +177,13 @@ struct __attribute__((packed)) guest_layout {
     return *this;
   }
 };
+
+template<typename F>
+void FinalizeHostTrampolineForGuestFunction(const guest_layout<F*>& PreallocatedTrampolineForGuestFunction) {
+  FEXCore::FinalizeHostTrampolineForGuestFunction(
+      (FEXCore::HostToGuestTrampolinePtr*)PreallocatedTrampolineForGuestFunction.data,
+      (void*)&CallbackUnpack<F>::CallGuestPtr);
+}
 
 #if IS_32BIT_THUNK
 // Specialized for uint32_t so that members annotated as "size_t" can automatically be converted from 64-bit to 32-bit
@@ -308,6 +341,8 @@ const host_layout<T>& to_host_layout(const T& t) {
 // Specialization for size_t, which is 64-bit on 64-bit but 32-bit on 32-bit
 template<>
 struct host_layout<size_t> {
+  // TODO: This generic implementation shouldn't be needed. Instead, auto-specialize host_layout for all types used as members.
+
   size_t data;
 
   host_layout(const guest_layout<uint32_t>& from) : data { from.data } {
@@ -320,12 +355,22 @@ struct host_layout<size_t> {
 
 template<typename T, size_t N>
 struct host_layout<T[N]> {
+  // TODO: This generic implementation shouldn't be needed. Instead, auto-specialize host_layout for all types used as members.
+
   std::array<T, N> data;
 
   host_layout(const guest_layout<T[N]>& from) {
     for (size_t i = 0; i < N; ++i) {
       data[i] = host_layout<T> { from.data[i] }.data;
     }
+
+// TODO: Check that T is ABI compatible (needed for VkMemoryHeap)
+//    static_assert(!std::is_class_v<T>, "No host_layout specialization generated for struct/class type");
+
+    // NOTE: This is not strictly neccessary since differently sized types may
+    //       be used across architectures. It's important that the host type
+    //       can represent all guest values without loss, however.
+//    static_assert(sizeof(data) == sizeof(from));
   }
 };
 
@@ -341,6 +386,12 @@ struct host_layout<T*> {
 
   // TODO: Make this explicit?
   host_layout() = default;
+
+  // Allow conversion of integral pointee types of same size and sign to each other.
+  // This is useful for handling "long"/"long long" on 64-bit, as well as uint8_t/char.
+  template<typename U>
+  host_layout(const guest_layout<U*>& from) requires (std::is_same_v<T, const unsigned long> && std::is_integral_v<U> && std::is_convertible_v<T, U> && std::is_signed_v<T> == std::is_signed_v<U>) : data { (T*)(uintptr_t)from.data } {
+  }
 };
 
 template<typename T>
@@ -627,29 +678,6 @@ struct GuestWrapperForHostFunction<Result(Args...), GuestArgs...> {
     Invoke(f, *args);
   }
 };
-
-// TODO: Move?
-template<typename F>
-void FinalizeHostTrampolineForGuestFunction(const guest_layout<F*>& PreallocatedTrampolineForGuestFunction) {
-  FEXCore::FinalizeHostTrampolineForGuestFunction(
-      (FEXCore::HostToGuestTrampolinePtr*)PreallocatedTrampolineForGuestFunction.data,
-      (void*)&CallbackUnpack<F>::CallGuestPtr);
-}
-
-template<typename FuncType>
-void MakeHostTrampolineForGuestFunctionAt(uintptr_t GuestTarget, uintptr_t GuestUnpacker, FuncType **Func) {
-    *Func = (FuncType*)FEXCore::MakeHostTrampolineForGuestFunction(
-        (void*)&CallbackUnpack<FuncType>::CallGuestPtr,
-        GuestTarget,
-        GuestUnpacker);
-}
-
-template<typename F>
-void FinalizeHostTrampolineForGuestFunction(F* PreallocatedTrampolineForGuestFunction) {
-  FEXCore::FinalizeHostTrampolineForGuestFunction(
-      (FEXCore::HostToGuestTrampolinePtr*)PreallocatedTrampolineForGuestFunction,
-      (void*)&CallbackUnpack<F>::CallGuestPtr);
-}
 
 // In the case of the thunk host_loader being the default, FEX need to use dlsym with RTLD_DEFAULT.
 // If FEX queried the symbol object directly then it wouldn't follow symbol overriding rules.
