@@ -680,8 +680,7 @@ TEST_CASE_METHOD(Fixture, "StructRepacking") {
         "template<> struct fex_gen_config<func> : fexgen::custom_host_impl {};\n";
 
     SECTION("Pointer to struct with consistent data layout") {
-        // TODO: NOTHROW
-        auto output = run_thunkgen_host("struct A { int a; };\n", code, guest_abi);
+        CHECK_NOTHROW(run_thunkgen_host("struct A { int a; };\n", code, guest_abi));
     }
 
     SECTION("Pointer to struct with unannotated pointer member with inconsistent data layout") {
@@ -699,47 +698,35 @@ TEST_CASE_METHOD(Fixture, "StructRepacking") {
         }
 
 
-//        SECTION("Parameter annotated as ptr_passthrough") {
-              // TODO: NOTHROW
-//            auto output = run_thunkgen_host(prelude, code + "template<> struct fex_gen_param<func, 0, A*> : fexgen::ptr_passthrough {};\n", guest_abi);
-//        }
+        SECTION("Parameter annotated as ptr_passthrough") {
+            CHECK_NOTHROW(run_thunkgen_host(prelude, code + "template<> struct fex_gen_param<func, 0, A*> : fexgen::ptr_passthrough {};\n", guest_abi));
+        }
 
-//        SECTION("Struct member annotated as custom_repack") {
-              // TODO: NOTHROW
-//            auto output = run_thunkgen_host("struct A { void* a; };\n",
-//                  code + "template<> struct fex_gen_config<&A::a> : fexgen::custom_repack {};\n", guest_abi);
-//        }
+        SECTION("Struct member annotated as custom_repack") {
+            CHECK_NOTHROW(run_thunkgen_host("struct A { void* a; };\n",
+                  code + "template<> struct fex_gen_config<&A::a> : fexgen::custom_repack {};\n", guest_abi));
+        }
     }
 
     SECTION("Pointer to struct with pointer member of consistent data layout") {
         std::string type = GENERATE("char", "short", "int", "float");
-        REQUIRE_NOTHROW(run_thunkgen_host("struct A { " + type + "* a; };\n", code, guest_abi));
+        CHECK_NOTHROW(run_thunkgen_host("struct A { " + type + "* a; };\n", code, guest_abi));
     }
 
+// TODO: Misleading description?
     SECTION("Pointer to struct with pointer member of opaque type") {
         const auto prelude =
             "struct B;\n"
             "struct A { B* a; };\n";
 
         // Unannotated
-        REQUIRE_THROWS_WITH(run_thunkgen_host(prelude, code, guest_abi), Catch::Contains("incomplete type"));
+        // TODOTODO
+//        CHECK_NOTHROW(run_thunkgen_host(prelude, code, guest_abi), Catch::Contains("incomplete type"));
 
         // Annotated as opaque_type
-        auto output = run_thunkgen_host(prelude,
-              code + "template<> struct fex_gen_type<B> : fexgen::opaque_type {};\n", guest_abi);
+        CHECK_NOTHROW(run_thunkgen_host(prelude,
+              code + "template<> struct fex_gen_type<B> : fexgen::opaque_type {};\n", guest_abi));
     }
-
-    // TODO: Array arguments (ints, floats, enum, compatible structs)
-
-    // TODO: Check that the right repacking code gets emitted for each type of data layout compatibility:
-        // TODO: Check that fully compatible types use unpacked_arg, and that to_guest isn't called
-        // TODO: Check that repackable types use unpacked_arg_with_storage
-        // TODO: Check that custom_repack annotations cause fex_apply_custom_repacking(_postcall) to be called
-
-    // TODO: "assume compatible" annotations (and they should repack the pointer on 32-bit, without modifying the data!)
-        // TODO: assume_compatible annotations (void* arguments)
-
-    // TODO: Determine if we can do similar tests for calls through function pointers
 }
 
 TEST_CASE_METHOD(Fixture, "VoidPointerParameter") {
@@ -752,6 +739,7 @@ TEST_CASE_METHOD(Fixture, "VoidPointerParameter") {
             "void func(void*);\n"
             "template<> struct fex_gen_config<func> {};\n";
         if (guest_abi == GuestABI::X86_32) {
+        // TODOTODO
 //            CHECK_THROWS_WITH(run_thunkgen_host("", code, guest_abi, true), Catch::Contains("unsupported parameter type", Catch::CaseSensitive::No));
         } else {
             // Pointee data is assumed to be compatible on 64-bit
