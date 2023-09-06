@@ -397,10 +397,13 @@ void GenerateThunkLibsAction::OnAnalysisComplete(clang::ASTContext& context) {
             fmt::print(file, "  using type = {};\n", struct_name);
             fmt::print(file, "  type data;\n");
             fmt::print(file, "\n");
-            fmt::print(file, "  host_layout(const guest_layout<{}>& from) :\n", struct_name);
+            fmt::print(file, "  host_layout(const guest_layout<{}>& from) ", struct_name);
             if (type_compat.at(type) == TypeCompatibility::Full) {
+                fmt::print(file, ":\n");
                 fmt::print(file, "    data {{ from.data }} {{\n");
-            } else {
+                fmt::print(file, "  }}\n");
+            } else if (type_compat.at(type) == TypeCompatibility::Repackable) {
+                fmt::print(file, ":\n");
                 fmt::print(file, "    data {{\n");
                 fmt::print(file, "      // Constructor performs layout repacking.\n");
                 fmt::print(file, "      // Each initializer itself is wrapped in host_layout<> to enable recursive layout repacking\n");
@@ -425,8 +428,10 @@ void GenerateThunkLibsAction::OnAnalysisComplete(clang::ASTContext& context) {
                 for (auto* member : type->getAsStructureType()->getDecl()->fields()) {
                     map_field(member, false);
                 }
+                fmt::print(file, "  }}\n");
+            } else {
+                fmt::print(file, "= delete;\n");
             }
-            fmt::print(file, "  }}\n");
             fmt::print(file, "}};\n\n");
 
             if (type_compat.at(type) == TypeCompatibility::Full) {
