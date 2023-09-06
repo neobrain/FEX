@@ -441,12 +441,16 @@ void GenerateThunkLibsAction::OnAnalysisComplete(clang::ASTContext& context) {
 
             fmt::print(file, "// Constructor performs layout repacking.\n");
             fmt::print(file, "// Each initializer itself is wrapped in host_layout<> to enable recursive layout repacking\n");
-            fmt::print(file, "inline guest_layout<{}> to_guest(const host_layout<{}>& from) {{\n", struct_name, struct_name);
+            fmt::print(file, "inline guest_layout<{}> to_guest(const host_layout<{}>& from) ", struct_name, struct_name);
             if (type_compat.at(type) == TypeCompatibility::Full) {
+                fmt::print(file, "{{\n");
                 fmt::print(file, "  guest_layout<{}> ret;\n", struct_name);
                 fmt::print(file, "  static_assert(sizeof(from) == sizeof(ret));\n");
                 fmt::print(file, "  memcpy(&ret, &from, sizeof(from));\n");
-            } else {
+                fmt::print(file, "  return ret;\n");
+                fmt::print(file, "}}\n\n");
+            } else if (type_compat.at(type) == TypeCompatibility::Repackable) {
+                fmt::print(file, "{{\n");
                 fmt::print(file, "  guest_layout<{}> ret {{ .data {{\n", struct_name);
                 auto map_field2 = [&file](const StructInfo::MemberInfo& member, bool skip_arrays) {
                     if (member.member_name.starts_with("pfn")) {
@@ -475,9 +479,11 @@ void GenerateThunkLibsAction::OnAnalysisComplete(clang::ASTContext& context) {
                 for (auto& member : guest_abi.at(struct_name).get_if_struct()->members) {
                     map_field2(member, false);
                 }
+                fmt::print(file, "  return ret;\n");
+                fmt::print(file, "}}\n\n");
+            } else {
+                fmt::print(file, "= delete;\n\n");
             }
-            fmt::print(file, "  return ret;\n");
-            fmt::print(file, "}}\n\n");
 
             if (type_compat.at(type) == TypeCompatibility::Full) {
                 fmt::print(file, "template<> inline constexpr bool has_compatible_data_layout<{}> = true;\n", struct_name);
