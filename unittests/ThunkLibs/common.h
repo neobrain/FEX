@@ -85,17 +85,39 @@ inline void run_tool(clang::tooling::ToolAction& action, std::string_view code, 
 
     // Corresponds to the content of GeneratorInterface.h
     const char* common_header_code = R"(namespace fexgen {
-struct returns_guest_pointer {};
+// function annotations: fex_gen_config<MyFunc>
+struct returns_guest_pointer {}; // TODO: Deprecate in favor of pointer_passthrough
 struct custom_host_impl {};
 struct callback_annotation_base { bool prevent_multiple; };
 struct callback_stub : callback_annotation_base {};
 struct callback_guest : callback_annotation_base {};
 
+// type annotations: fex_gen_config<MyStruct>
+//struct opaque_to_guest {};
+//struct opaque_to_host {};
+
+// If used, fex_custom_repack must be specialized for the annotated struct member
+struct custom_repack {};
+
+// Pointers to types annotated with this will be passed through without change
 struct opaque_type {};
+
 struct assume_compatible_data_layout {};
 
 struct ptr_passthrough {};
 
+// struct member annotations: fex_gen_config<&MyStruct::member>
+struct is_padding_member {};
+
+// function parameter annotations: fex_gen_config<fexgen::annotate_parameter<MyFunc, 2>>
+struct ptr_in {};
+struct ptr_out {};
+struct ptr_inout {};
+struct ptr_pointer_passthrough {};
+struct ptr_is_untyped_address {};
+
+template<auto, int, typename = decltype(nullptr)>
+struct annotate_parameter {};
 } // namespace fexgen
 
 template<auto, int, typename = void> struct fex_gen_param {};
