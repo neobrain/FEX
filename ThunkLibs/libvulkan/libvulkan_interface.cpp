@@ -52,7 +52,103 @@ template<> struct fex_gen_type<VkDeviceOrHostAddressConstKHR> : fexgen::assume_c
 template<> struct fex_gen_type<VkPerformanceValueDataINTEL> : fexgen::assume_compatible_data_layout {};
 #endif
 
-#ifndef IS_32BIT_THUNK
+#ifdef IS_32BIT_THUNK
+// TODO: These are nested structures that should be detected automatically
+//template<> struct fex_gen_type<VkApplicationInfo> {};
+template<> struct fex_gen_config<&VkApplicationInfo::pNext> : fexgen::custom_repack {};
+
+template<> struct fex_gen_config<&VkInstanceCreateInfo::pNext> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkInstanceCreateInfo::pApplicationInfo> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkInstanceCreateInfo::ppEnabledLayerNames> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkInstanceCreateInfo::ppEnabledExtensionNames> : fexgen::custom_repack {};
+
+template<> struct fex_gen_config<&VkDeviceQueueCreateInfo::pNext> : fexgen::custom_repack {};
+
+template<> struct fex_gen_config<&VkDeviceCreateInfo::pNext> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkDeviceCreateInfo::pQueueCreateInfos> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkDeviceCreateInfo::ppEnabledLayerNames> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkDeviceCreateInfo::ppEnabledExtensionNames> : fexgen::custom_repack {};
+
+template<> struct fex_gen_config<&VkSemaphoreCreateInfo::pNext> : fexgen::custom_repack {};
+
+template<> struct fex_gen_config<&VkSemaphoreTypeCreateInfo::pNext> : fexgen::custom_repack {};
+
+template<> struct fex_gen_config<&VkImageViewCreateInfo::pNext> : fexgen::custom_repack {};
+
+template<> struct fex_gen_config<&VkAttachmentDescription2::pNext> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkAttachmentReference2::pNext> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkBaseOutStructure::pNext> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkBufferMemoryBarrier2::pNext> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkCommandBufferBeginInfo::pNext> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkDependencyInfo::pNext> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkDescriptorUpdateTemplateCreateInfo::pNext> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkGraphicsPipelineCreateInfo::pNext> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkImageMemoryBarrier2::pNext> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkImageFormatListCreateInfo::pNext> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkImageMemoryRequirementsInfo2::pNext> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkMemoryAllocateInfo::pNext> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkMemoryAllocateFlagsInfo::pNext> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkMemoryBarrier2::pNext> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkMemoryDedicatedAllocateInfo::pNext> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkMemoryDedicatedRequirements::pNext> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkMemoryRequirements2::pNext> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkPipelineRenderingCreateInfo::pNext> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkRenderPassAttachmentBeginInfo::pNext> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkRenderPassBeginInfo::pNext> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkRenderPassCreateInfo::pNext> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkRenderPassCreateInfo2::pNext> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkSemaphoreWaitInfo::pNext> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkSubmitInfo::pNext> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkSubpassBeginInfo::pNext> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkSubpassDependency2::pNext> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkSubpassDescription2::pNext> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkSwapchainCreateInfoKHR::pNext> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkTimelineSemaphoreSubmitInfo::pNext> : fexgen::custom_repack {};
+
+
+template<> struct fex_gen_config<&VkDescriptorSetLayoutCreateInfo::pNext> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkDescriptorSetLayoutCreateInfo::pBindings> : fexgen::custom_repack {};
+
+template<> struct fex_gen_config<&VkRenderPassCreateInfo::pSubpasses> : fexgen::custom_repack {};
+// NOTE: pDependencies and pAttachments point to ABI-compatible data
+
+template<> struct fex_gen_config<&VkRenderPassCreateInfo2::pAttachments> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkRenderPassCreateInfo2::pSubpasses> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkRenderPassCreateInfo2::pDependencies> : fexgen::custom_repack {};
+
+template<> struct fex_gen_config<&VkPipelineShaderStageCreateInfo::pSpecializationInfo> : fexgen::custom_repack {};
+//template<> struct fex_gen_config<&VkSpecializationInfo::pMapEntries> : fexgen::custom_repack {};
+
+
+template<> struct fex_gen_config<&VkGraphicsPipelineCreateInfo::pStages> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkGraphicsPipelineCreateInfo::pVertexInputState> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkGraphicsPipelineCreateInfo::pInputAssemblyState> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkGraphicsPipelineCreateInfo::pTessellationState> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkGraphicsPipelineCreateInfo::pViewportState> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkGraphicsPipelineCreateInfo::pRasterizationState> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkGraphicsPipelineCreateInfo::pMultisampleState> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkGraphicsPipelineCreateInfo::pDepthStencilState> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkGraphicsPipelineCreateInfo::pColorBlendState> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkGraphicsPipelineCreateInfo::pDynamicState> : fexgen::custom_repack {};
+
+// Command buffers are dispatchable handles, so on 32-bit they need to be repacked
+template<> struct fex_gen_config<&VkSubmitInfo::pCommandBuffers> : fexgen::custom_repack {};
+
+template<> struct fex_gen_config<&VkRenderingInfo::pColorAttachments> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkRenderingInfo::pDepthAttachment> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkRenderingInfo::pStencilAttachment> : fexgen::custom_repack {};
+
+//template<> struct fex_gen_config<&VkSubpassDescription2::pInputAttachments> : fexgen::assume_compatible_data_layout {};
+//template<> struct fex_gen_config<&VkSubpassDescription2::pColorAttachments> : fexgen::assume_compatible_data_layout {};
+//template<> struct fex_gen_config<&VkSubpassDescription2::pResolveAttachments> : fexgen::assume_compatible_data_layout {};
+//template<> struct fex_gen_config<&VkSubpassDescription2::pDepthStencilAttachment> : fexgen::assume_compatible_data_layout {};
+
+template<> struct fex_gen_config<&VkDependencyInfo::pMemoryBarriers> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkDependencyInfo::pBufferMemoryBarriers> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkDependencyInfo::pImageMemoryBarriers> : fexgen::custom_repack {};
+
+template<> struct fex_gen_config<&VkDescriptorUpdateTemplateCreateInfo::pDescriptorUpdateEntries> : fexgen::custom_repack {};
+#else
 // The pNext member of this is a pointer to another VkBaseOutStructure, so data layout compatibility can't be inferred automatically
 template<> struct fex_gen_type<VkBaseOutStructure> : fexgen::assume_compatible_data_layout {};
 #endif
@@ -79,10 +175,27 @@ template<auto>
 struct fex_gen_config : fexgen::generate_guest_symtable, fexgen::indirect_guest_calls {
 };
 
+#ifdef IS_32BIT_THUNK
+template<> struct fex_gen_config<&VkCommandBufferBeginInfo::pInheritanceInfo> : fexgen::custom_repack {};
+
+// TODO: Should have per-member compatibility annotation
+template<> struct fex_gen_config<&VkPipelineCacheCreateInfo::pInitialData> : fexgen::custom_repack {};
+
+// TODO: Should have per-member compatibility annotation
+template<> struct fex_gen_config<&VkRenderPassBeginInfo::pClearValues> : fexgen::custom_repack {};
+#endif
+
 template<> struct fex_gen_config<vkCreateInstance> : fexgen::custom_host_impl {};
 template<> struct fex_gen_param<vkCreateInstance, 2, VkInstance*> : fexgen::ptr_passthrough {};
 template<> struct fex_gen_config<vkDestroyInstance> {};
+#ifndef IS_32BIT_THUNK
 template<> struct fex_gen_config<vkEnumeratePhysicalDevices> {};
+#else
+template<> struct fex_gen_config<vkEnumeratePhysicalDevices> : fexgen::custom_host_impl {};
+template<> struct fex_gen_param<vkEnumeratePhysicalDevices, 2, VkPhysicalDevice*> : fexgen::ptr_passthrough {};
+#endif
+
+
 template<> struct fex_gen_config<vkGetPhysicalDeviceFeatures> {};
 template<> struct fex_gen_config<vkGetPhysicalDeviceFormatProperties> {};
 template<> struct fex_gen_config<vkGetPhysicalDeviceImageFormatProperties> {};
