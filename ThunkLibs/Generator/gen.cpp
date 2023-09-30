@@ -348,10 +348,6 @@ void GenerateThunkLibsAction::OnAnalysisComplete(clang::ASTContext& context) {
                 type_compat[type] = TypeCompatibility::Full;
             }
 
-            if (type_compat.at(type) == TypeCompatibility::None && !type_repack_info.emit_layout_wrappers) {
-                continue;
-            }
-
             // These must be handled later since they are not canonicalized and hence must be de-duplicated first
             if (type->isBuiltinType()) {
                 continue;
