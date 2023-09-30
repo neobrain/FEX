@@ -289,7 +289,7 @@ template<> struct fex_gen_config<vkDestroyImage> {};
 template<> struct fex_gen_config<vkGetImageSubresourceLayout> {};
 template<> struct fex_gen_config<vkCreateImageView> {};
 template<> struct fex_gen_config<vkDestroyImageView> {};
-template<> struct fex_gen_config<vkCreateShaderModule> /*: fexgen::custom_host_impl*/ {};
+template<> struct fex_gen_config<vkCreateShaderModule> {};
 template<> struct fex_gen_config<vkDestroyShaderModule> {};
 template<> struct fex_gen_config<vkCreatePipelineCache> {};
 template<> struct fex_gen_config<vkDestroyPipelineCache> {};
