@@ -348,7 +348,7 @@ void GenerateThunkLibsAction::OnAnalysisComplete(clang::ASTContext& context) {
                 type_compat[type] = TypeCompatibility::Full;
             }
 
-            if (type_compat.at(type) == TypeCompatibility::None) {
+            if (type_compat.at(type) == TypeCompatibility::None && !type_repack_info.emit_layout_wrappers) {
                 continue;
             }
 
@@ -402,7 +402,7 @@ void GenerateThunkLibsAction::OnAnalysisComplete(clang::ASTContext& context) {
                 fmt::print(file, ":\n");
                 fmt::print(file, "    data {{ from.data }} {{\n");
                 fmt::print(file, "  }}\n");
-            } else if (type_compat.at(type) == TypeCompatibility::Repackable) {
+            } else if (type_compat.at(type) == TypeCompatibility::Repackable || type_repack_info.emit_layout_wrappers) {
                 fmt::print(file, ":\n");
                 fmt::print(file, "    data {{\n");
                 fmt::print(file, "      // Constructor performs layout repacking.\n");
