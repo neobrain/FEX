@@ -467,7 +467,7 @@ void GenerateThunkLibsAction::OnAnalysisComplete(clang::ASTContext& context) {
                 fmt::print(file, "  memcpy(&ret, &from, sizeof(from));\n");
                 fmt::print(file, "  return ret;\n");
                 fmt::print(file, "}}\n\n");
-            } else if (type_compat.at(type) == TypeCompatibility::Repackable) {
+            } else if (type_compat.at(type) == TypeCompatibility::Repackable || type_repack_info.emit_layout_wrappers) {
                 fmt::print(file, "{{\n");
                 fmt::print(file, "  guest_layout<{}> ret {{ .data {{\n", struct_name);
                 auto map_field2 = [&file](const StructInfo::MemberInfo& member, bool skip_arrays) {
