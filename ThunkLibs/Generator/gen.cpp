@@ -683,7 +683,6 @@ void GenerateThunkLibsAction::OnAnalysisComplete(clang::ASTContext& context) {
             FuncPtrInfo info = { };
 
             info.result = func_type->getReturnType().getAsString();
-            info.param_annotations = param_annotations;
 
             // TODO: Respect param_annotations
             for (auto arg : func_type->getParamTypes()) {
