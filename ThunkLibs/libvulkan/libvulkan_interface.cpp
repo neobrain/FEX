@@ -87,7 +87,7 @@ template<> struct fex_gen_config<&VkAttachmentDescription2::pNext> : fexgen::cus
 template<> struct fex_gen_config<&VkAttachmentReference2::pNext> : fexgen::custom_repack {};
 template<> struct fex_gen_config<&VkBaseOutStructure::pNext> : fexgen::custom_repack {};
 template<> struct fex_gen_config<&VkBufferMemoryBarrier2::pNext> : fexgen::custom_repack {};
-template<> struct fex_gen_config<&VkCommandBufferBeginInfo::pNext> : fexgen::custom_repack {};
+//template<> struct fex_gen_config<&VkCommandBufferBeginInfo::pNext> : fexgen::custom_repack {};
 template<> struct fex_gen_config<&VkDependencyInfo::pNext> : fexgen::custom_repack {};
 template<> struct fex_gen_config<&VkDescriptorUpdateTemplateCreateInfo::pNext> : fexgen::custom_repack {};
 template<> struct fex_gen_config<&VkGraphicsPipelineCreateInfo::pNext> : fexgen::custom_repack {};
@@ -289,7 +289,7 @@ template<> struct fex_gen_config<vkDestroyImage> {};
 template<> struct fex_gen_config<vkGetImageSubresourceLayout> {};
 template<> struct fex_gen_config<vkCreateImageView> {};
 template<> struct fex_gen_config<vkDestroyImageView> {};
-template<> struct fex_gen_config<vkCreateShaderModule> : fexgen::custom_host_impl {};
+template<> struct fex_gen_config<vkCreateShaderModule> /*: fexgen::custom_host_impl*/ {};
 template<> struct fex_gen_config<vkDestroyShaderModule> {};
 template<> struct fex_gen_config<vkCreatePipelineCache> {};
 template<> struct fex_gen_config<vkDestroyPipelineCache> {};
