@@ -408,6 +408,11 @@ void GenerateThunkLibsAction::OnAnalysisComplete(clang::ASTContext& context) {
                 fmt::print(file, "      // Constructor performs layout repacking.\n");
                 fmt::print(file, "      // Each initializer itself is wrapped in host_layout<> to enable recursive layout repacking\n");
                 auto map_field = [&file](clang::FieldDecl* member, bool skip_arrays) {
+                    if (member->getType()->isFunctionPointerType()) {
+                        // TODO: At least assign nullptr?
+                        return;
+                    }
+
                     auto decl_name = member->getNameAsString();
                     auto type_name = member->getType().getAsString();
                     auto array_type = llvm::dyn_cast<clang::ConstantArrayType>(member->getType());

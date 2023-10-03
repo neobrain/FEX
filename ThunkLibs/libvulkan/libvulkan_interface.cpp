@@ -52,6 +52,11 @@ template<> struct fex_gen_type<VkDeviceOrHostAddressConstKHR> : fexgen::assume_c
 template<> struct fex_gen_type<VkPerformanceValueDataINTEL> : fexgen::assume_compatible_data_layout {};
 #endif
 
+// Structures that contain function pointers
+// TODO: Use custom repacking for these instead
+template<> struct fex_gen_type<VkDebugReportCallbackCreateInfoEXT> : fexgen::emit_layout_wrappers {};
+template<> struct fex_gen_type<VkDebugUtilsMessengerCreateInfoEXT> : fexgen::emit_layout_wrappers {};
+
 #ifdef IS_32BIT_THUNK
 // TODO: These are nested structures that should be detected automatically
 //template<> struct fex_gen_type<VkApplicationInfo> {};
