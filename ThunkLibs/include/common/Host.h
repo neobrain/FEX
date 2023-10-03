@@ -507,10 +507,9 @@ constexpr bool IsCompatible() {
 
 template<ParameterAnnotations Annotation, typename HostT, typename T>
 auto Projection(guest_layout<T>& data) {
-  constexpr bool is_compatible = IsCompatible<T, Annotation>() && std::is_same_v<T, HostT>;
   if constexpr (Annotation.is_passthrough) {
     return data;
-  } else if constexpr (is_compatible || !std::is_pointer_v<T>) {
+  } else if constexpr ((IsCompatible<T, Annotation>() && std::is_same_v<T, HostT>) || !std::is_pointer_v<T>) {
     return host_layout<HostT> { data }.data;
   } else {
     // This argument requires temporary storage for repacked data
