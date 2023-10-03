@@ -18,8 +18,9 @@ template<> struct fex_gen_type<drmDevice> : fexgen::assume_compatible_data_layou
 template<> struct fex_gen_type<drmStatsT> : fexgen::assume_compatible_data_layout {};
 
 // TODO: Convert vtable
-template<> struct fex_gen_type<drmServerInfo> : fexgen::assume_compatible_data_layout {};
 template<> struct fex_gen_type<drmEventContext> : fexgen::assume_compatible_data_layout {};
+template<> struct fex_gen_type<drmHashEntry> : fexgen::assume_compatible_data_layout {};
+template<> struct fex_gen_type<drmServerInfo> : fexgen::assume_compatible_data_layout {};
 #endif
 
 size_t FEX_usable_size(void*);

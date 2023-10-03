@@ -642,9 +642,11 @@ template<> struct fex_gen_config<vkGetRenderingAreaGranularityKHR> {};
 template<> struct fex_gen_config<vkGetDeviceImageSubresourceLayoutKHR> {};
 template<> struct fex_gen_config<vkGetImageSubresourceLayout2KHR> {};
 template<> struct fex_gen_config<vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR> {};
+#endif
 template<> struct fex_gen_config<vkCreateDebugReportCallbackEXT> : fexgen::custom_host_impl {};
 template<> struct fex_gen_param<vkCreateDebugReportCallbackEXT, 1, const VkDebugReportCallbackCreateInfoEXT*> : fexgen::ptr_passthrough {};
 template<> struct fex_gen_config<vkDestroyDebugReportCallbackEXT> : fexgen::custom_host_impl {};
+#ifndef IS_32BIT_THUNK
 template<> struct fex_gen_config<vkDebugReportMessageEXT> {};
 template<> struct fex_gen_config<vkDebugMarkerSetObjectTagEXT> {};
 template<> struct fex_gen_config<vkDebugMarkerSetObjectNameEXT> {};
@@ -692,9 +694,11 @@ template<> struct fex_gen_config<vkQueueInsertDebugUtilsLabelEXT> {};
 template<> struct fex_gen_config<vkCmdBeginDebugUtilsLabelEXT> {};
 template<> struct fex_gen_config<vkCmdEndDebugUtilsLabelEXT> {};
 template<> struct fex_gen_config<vkCmdInsertDebugUtilsLabelEXT> {};
+#endif
 template<> struct fex_gen_config<vkCreateDebugUtilsMessengerEXT> : fexgen::custom_host_impl {};
 template<> struct fex_gen_param<vkCreateDebugUtilsMessengerEXT, 1, const VkDebugUtilsMessengerCreateInfoEXT*> : fexgen::ptr_passthrough {};
 template<> struct fex_gen_config<vkDestroyDebugUtilsMessengerEXT> {};
+#ifndef IS_32BIT_THUNK
 template<> struct fex_gen_config<vkSubmitDebugUtilsMessageEXT> {};
 template<> struct fex_gen_config<vkCmdSetSampleLocationsEXT> {};
 template<> struct fex_gen_config<vkGetPhysicalDeviceMultisamplePropertiesEXT> {};
