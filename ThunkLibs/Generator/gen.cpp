@@ -449,6 +449,12 @@ void GenerateThunkLibsAction::OnAnalysisComplete(clang::ASTContext& context) {
             } else {
                 fmt::print(file, "  guest_layout<{}> ret {{ .data {{\n", struct_name);
                 auto map_field2 = [&file](const StructInfo::MemberInfo& member, bool skip_arrays) {
+                    if (member.member_name.starts_with("pfn")) {
+                        // TODO: Detect function pointers properly
+                        // TODO: At least null out the member
+                        return;
+                    }
+
                     auto& decl_name = member.member_name;
                     auto& array_size = member.array_size;
                     if (!array_size && skip_arrays) {
