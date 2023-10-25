@@ -719,6 +719,7 @@ template<> struct fex_gen_config<glCullFace> {};
 template<> struct fex_gen_config<glCullParameterdvEXT> {};
 template<> struct fex_gen_config<glCullParameterfvEXT> {};
 template<> struct fex_gen_config<glCurrentPaletteMatrixARB> {};
+// TODO: These don't need to be stubbed anymore
 template<> struct fex_gen_config<glDebugMessageCallbackAMD> : fexgen::callback_stub {};
 template<> struct fex_gen_config<glDebugMessageCallbackARB> : fexgen::callback_stub {};
 template<> struct fex_gen_config<glDebugMessageCallback> : fexgen::callback_stub {};
