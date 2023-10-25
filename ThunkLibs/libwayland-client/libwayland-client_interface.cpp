@@ -56,7 +56,6 @@ template<> struct fex_gen_config<wl_proxy_get_user_data> {};
 template<> struct fex_gen_config<wl_proxy_get_version> {};
 template<> struct fex_gen_config<wl_proxy_set_queue> {};
 template<> struct fex_gen_config<wl_proxy_set_tag> {};
-// TODO: This has a void* parameter. Why does 32-bit accept this without annotations?
 template<> struct fex_gen_config<wl_proxy_set_user_data> {};
 template<> struct fex_gen_config<wl_proxy_wrapper_destroy> {};
 
