@@ -437,6 +437,13 @@ int main(int argc, char **argv, char **const envp) {
     else {
       Allocator = FEX::HLE::CreatePassthroughAllocator();
     }
+
+    // Allocate heap memory until jemalloc exhausted any remaining reserves in the upper 32-bit address space
+    // TODO: This is probably an incomplete workaround
+    auto data = malloc(0x1);
+    while ((uintptr_t)data >> 32) {
+      data = malloc(0x1);
+    }
   }
 
   // System allocator is now system allocator or FEX
