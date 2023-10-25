@@ -93,9 +93,8 @@ static void FEXFN_IMPL(vkFreeMemory)(VkDevice a_0, VkDeviceMemory a_1, const VkA
   LDR_PTR(vkFreeMemory)(a_0, a_1, nullptr);
 }
 
-#if 0
-static VkResult FEXFN_IMPL(vkCreateDebugReportCallbackEXT)(VkInstance a_0, const VkDebugReportCallbackCreateInfoEXT* a_1, const VkAllocationCallbacks* a_2, VkDebugReportCallbackEXT* a_3) {
-  VkDebugReportCallbackCreateInfoEXT overridden_callback = *a_1;
+static VkResult FEXFN_IMPL(vkCreateDebugReportCallbackEXT)(VkInstance a_0, guest_layout<const VkDebugReportCallbackCreateInfoEXT*> a_1, const VkAllocationCallbacks* a_2, VkDebugReportCallbackEXT* a_3) {
+  VkDebugReportCallbackCreateInfoEXT overridden_callback = *a_1.data;
   overridden_callback.pfnCallback = DummyVkDebugReportCallback;
   (void*&)LDR_PTR(vkCreateDebugReportCallbackEXT) = (void*)LDR_PTR(vkGetInstanceProcAddr)(a_0, "vkCreateDebugReportCallbackEXT");
   return LDR_PTR(vkCreateDebugReportCallbackEXT)(a_0, &overridden_callback, nullptr, a_3);
@@ -105,7 +104,21 @@ static void FEXFN_IMPL(vkDestroyDebugReportCallbackEXT)(VkInstance a_0, VkDebugR
   (void*&)LDR_PTR(vkDestroyDebugReportCallbackEXT) = (void*)LDR_PTR(vkGetInstanceProcAddr)(a_0, "vkDestroyDebugReportCallbackEXT");
   LDR_PTR(vkDestroyDebugReportCallbackEXT)(a_0, a_1, nullptr);
 }
-#endif
+
+extern "C" VkBool32 DummyVkDebugUtilsMessengerCallback(
+    VkDebugUtilsMessageSeverityFlagBitsEXT, VkDebugUtilsMessageTypeFlagsEXT,
+    const VkDebugUtilsMessengerCallbackDataEXT*, void*) {
+  return VK_FALSE;
+}
+
+static VkResult FEXFN_IMPL(vkCreateDebugUtilsMessengerEXT)(
+    VkInstance_T* a_0, guest_layout<const VkDebugUtilsMessengerCreateInfoEXT*> a_1,
+    const VkAllocationCallbacks* a_2, VkDebugUtilsMessengerEXT* a_3) {
+  VkDebugUtilsMessengerCreateInfoEXT overridden_callback = *a_1.data;
+  overridden_callback.pfnUserCallback = DummyVkDebugUtilsMessengerCallback;
+  (void*&)LDR_PTR(vkCreateDebugUtilsMessengerEXT) = (void*)LDR_PTR(vkGetInstanceProcAddr)(a_0, "vkCreateDebugUtilsMessengerEXT");
+  return LDR_PTR(vkCreateDebugUtilsMessengerEXT)(a_0, &overridden_callback, nullptr, a_3);
+}
 
 static PFN_vkVoidFunction FEXFN_IMPL(vkGetDeviceProcAddr)(VkDevice a_0, const char* a_1) {
   // Just return the host facing function pointer

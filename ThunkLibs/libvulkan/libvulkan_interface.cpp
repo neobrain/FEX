@@ -429,11 +429,9 @@ template<> struct fex_gen_config<vkGetRenderingAreaGranularityKHR> {};
 template<> struct fex_gen_config<vkGetDeviceImageSubresourceLayoutKHR> {};
 template<> struct fex_gen_config<vkGetImageSubresourceLayout2KHR> {};
 template<> struct fex_gen_config<vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR> {};
-#if TODO_FUNCPTRS
-// Pointee structs contain function pointers. We should be able to use ptr_passthrough on individual members
 template<> struct fex_gen_config<vkCreateDebugReportCallbackEXT> : fexgen::custom_host_impl {};
+template<> struct fex_gen_param<vkCreateDebugReportCallbackEXT, 1, const VkDebugReportCallbackCreateInfoEXT*> : fexgen::ptr_passthrough {};
 template<> struct fex_gen_config<vkDestroyDebugReportCallbackEXT> : fexgen::custom_host_impl {};
-#endif
 template<> struct fex_gen_config<vkDebugReportMessageEXT> {};
 template<> struct fex_gen_config<vkDebugMarkerSetObjectTagEXT> {};
 template<> struct fex_gen_config<vkDebugMarkerSetObjectNameEXT> {};
@@ -481,10 +479,8 @@ template<> struct fex_gen_config<vkQueueInsertDebugUtilsLabelEXT> {};
 template<> struct fex_gen_config<vkCmdBeginDebugUtilsLabelEXT> {};
 template<> struct fex_gen_config<vkCmdEndDebugUtilsLabelEXT> {};
 template<> struct fex_gen_config<vkCmdInsertDebugUtilsLabelEXT> {};
-#if TODO_FUNCPTRS
-// Pointee structs contain function pointers. We should be able to use ptr_passthrough on individual members
-template<> struct fex_gen_config<vkCreateDebugUtilsMessengerEXT> {};
-#endif
+template<> struct fex_gen_config<vkCreateDebugUtilsMessengerEXT> : fexgen::custom_host_impl {};
+template<> struct fex_gen_param<vkCreateDebugUtilsMessengerEXT, 1, const VkDebugUtilsMessengerCreateInfoEXT*> : fexgen::ptr_passthrough {};
 template<> struct fex_gen_config<vkDestroyDebugUtilsMessengerEXT> {};
 template<> struct fex_gen_config<vkSubmitDebugUtilsMessageEXT> {};
 template<> struct fex_gen_config<vkCmdSetSampleLocationsEXT> {};
@@ -535,9 +531,7 @@ template<> struct fex_gen_config<vkCmdSetPerformanceOverrideINTEL> {};
 template<> struct fex_gen_config<vkAcquirePerformanceConfigurationINTEL> {};
 template<> struct fex_gen_config<vkReleasePerformanceConfigurationINTEL> {};
 template<> struct fex_gen_config<vkQueueSetPerformanceConfigurationINTEL> {};
-#if TODO_ADD_CUSTOM_REPACK_FOR_VkPerformanceValueDataINTEL
 template<> struct fex_gen_config<vkGetPerformanceParameterINTEL> {};
-#endif
 template<> struct fex_gen_config<vkSetLocalDimmingAMD> {};
 template<> struct fex_gen_config<vkGetBufferDeviceAddressEXT> {};
 template<> struct fex_gen_config<vkGetPhysicalDeviceToolPropertiesEXT> {};
@@ -606,27 +600,19 @@ template<> struct fex_gen_config<vkCmdDrawMultiEXT> {};
 template<> struct fex_gen_config<vkCmdDrawMultiIndexedEXT> {};
 template<> struct fex_gen_config<vkCreateMicromapEXT> {};
 template<> struct fex_gen_config<vkDestroyMicromapEXT> {};
-#if TODO_ADD_CUSTOM_REPACK_FOR_VkDeviceOrHostAddressKHR
 template<> struct fex_gen_config<vkCmdBuildMicromapsEXT> {};
 template<> struct fex_gen_config<vkBuildMicromapsEXT> {};
-#endif
 template<> struct fex_gen_config<vkCopyMicromapEXT> {};
-#if TODO_ADD_CUSTOM_REPACK_FOR_VkDeviceOrHostAddressKHR
 template<> struct fex_gen_config<vkCopyMicromapToMemoryEXT> {};
 template<> struct fex_gen_config<vkCopyMemoryToMicromapEXT> {};
-#endif
 template<> struct fex_gen_config<vkWriteMicromapsPropertiesEXT> {};
 template<> struct fex_gen_param<vkWriteMicromapsPropertiesEXT, 5, void*> : fexgen::assume_compatible_data_layout {};
 template<> struct fex_gen_config<vkCmdCopyMicromapEXT> {};
-#if TODO_ADD_CUSTOM_REPACK_FOR_VkDeviceOrHostAddressKHR
 template<> struct fex_gen_config<vkCmdCopyMicromapToMemoryEXT> {};
 template<> struct fex_gen_config<vkCmdCopyMemoryToMicromapEXT> {};
-#endif
 template<> struct fex_gen_config<vkCmdWriteMicromapsPropertiesEXT> {};
 template<> struct fex_gen_config<vkGetDeviceMicromapCompatibilityEXT> {};
-#if TODO_ADD_CUSTOM_REPACK_FOR_VkDeviceOrHostAddressKHR
 template<> struct fex_gen_config<vkGetMicromapBuildSizesEXT> {};
-#endif
 template<> struct fex_gen_config<vkCmdDrawClusterHUAWEI> {};
 template<> struct fex_gen_config<vkCmdDrawClusterIndirectHUAWEI> {};
 template<> struct fex_gen_config<vkSetDeviceMemoryPriorityEXT> {};
@@ -686,29 +672,21 @@ template<> struct fex_gen_config<vkGetDynamicRenderingTilePropertiesQCOM> {};
 template<> struct fex_gen_config<vkCmdSetAttachmentFeedbackLoopEnableEXT> {};
 template<> struct fex_gen_config<vkCreateAccelerationStructureKHR> {};
 template<> struct fex_gen_config<vkDestroyAccelerationStructureKHR> {};
-#if TODO_ADD_CUSTOM_REPACK_FOR_VkDeviceOrHostAddressKHR
 template<> struct fex_gen_config<vkCmdBuildAccelerationStructuresKHR> {};
 template<> struct fex_gen_config<vkCmdBuildAccelerationStructuresIndirectKHR> {};
 template<> struct fex_gen_config<vkBuildAccelerationStructuresKHR> {};
-#endif
 template<> struct fex_gen_config<vkCopyAccelerationStructureKHR> {};
-#if TODO_ADD_CUSTOM_REPACK_FOR_VkDeviceOrHostAddressKHR
 template<> struct fex_gen_config<vkCopyAccelerationStructureToMemoryKHR> {};
 template<> struct fex_gen_config<vkCopyMemoryToAccelerationStructureKHR> {};
-#endif
 template<> struct fex_gen_config<vkWriteAccelerationStructuresPropertiesKHR> {};
 template<> struct fex_gen_param<vkWriteAccelerationStructuresPropertiesKHR, 5, void*> : fexgen::assume_compatible_data_layout {};
 template<> struct fex_gen_config<vkCmdCopyAccelerationStructureKHR> {};
-#if TODO_ADD_CUSTOM_REPACK_FOR_VkDeviceOrHostAddressKHR
 template<> struct fex_gen_config<vkCmdCopyAccelerationStructureToMemoryKHR> {};
 template<> struct fex_gen_config<vkCmdCopyMemoryToAccelerationStructureKHR> {};
-#endif
 template<> struct fex_gen_config<vkGetAccelerationStructureDeviceAddressKHR> {};
 template<> struct fex_gen_config<vkCmdWriteAccelerationStructuresPropertiesKHR> {};
 template<> struct fex_gen_config<vkGetDeviceAccelerationStructureCompatibilityKHR> {};
-#if TODO_ADD_CUSTOM_REPACK_FOR_VkDeviceOrHostAddressKHR
 template<> struct fex_gen_config<vkGetAccelerationStructureBuildSizesKHR> {};
-#endif
 template<> struct fex_gen_config<vkCmdTraceRaysKHR> {};
 template<> struct fex_gen_config<vkCreateRayTracingPipelinesKHR> {};
 template<> struct fex_gen_config<vkGetRayTracingCaptureReplayShaderGroupHandlesKHR> {};

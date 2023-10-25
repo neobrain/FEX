@@ -91,6 +91,11 @@ template<> struct fex_gen_type<snd_seq_timestamp> : fexgen::assume_compatible_da
 // Has anonymous union member
 template<> struct fex_gen_type<snd_seq_event> : fexgen::assume_compatible_data_layout {};
 
+#ifndef IS_32BIT_THUNK
+// TODO: Convert vtable
+template<> struct fex_gen_type<snd_pcm_scope_ops_t> : fexgen::assume_compatible_data_layout {};
+#endif
+
 template<> struct fex_gen_config<snd_asoundlib_version> {};
 #if SND_LIB_VERSION < ((1 << 16) | (2 << 8) | (6))
 // Exists on 1.2.6
@@ -528,7 +533,7 @@ template<> struct fex_gen_config<snd_pcm_meter_get_boundary> {};
 template<> struct fex_gen_config<snd_pcm_meter_add_scope> {};
 template<> struct fex_gen_config<snd_pcm_meter_search_scope> {};
 template<> struct fex_gen_config<snd_pcm_scope_malloc> {};
-//template<> struct fex_gen_config<snd_pcm_scope_set_ops> {}; // TODO: Support snd_pcm_scope_ops_t vtable
+template<> struct fex_gen_config<snd_pcm_scope_set_ops> {};
 template<> struct fex_gen_config<snd_pcm_scope_set_name> {};
 template<> struct fex_gen_config<snd_pcm_scope_get_name> {};
 template<> struct fex_gen_config<snd_pcm_scope_get_callback_private> {};
