@@ -169,7 +169,7 @@ template<> struct fex_gen_config<&VkDepthBiasRepresentationInfoEXT::pNext> : fex
 template<> struct fex_gen_config<&VkDescriptorAddressInfoEXT::pNext> : fexgen::custom_repack {};
 template<> struct fex_gen_config<&VkDescriptorBufferBindingInfoEXT::pNext> : fexgen::custom_repack {};
 template<> struct fex_gen_config<&VkDescriptorBufferBindingPushDescriptorBufferHandleEXT::pNext> : fexgen::custom_repack {};
-//template<> struct fex_gen_config<&VkDescriptorGetInfoEXT::pNext> : fexgen::custom_repack {};
+template<> struct fex_gen_config<&VkDescriptorGetInfoEXT::pNext> : fexgen::custom_repack {};
 template<> struct fex_gen_config<&VkDescriptorPoolCreateInfo::pNext> : fexgen::custom_repack {};
 template<> struct fex_gen_config<&VkDescriptorPoolInlineUniformBlockCreateInfo::pNext> : fexgen::custom_repack {};
 template<> struct fex_gen_config<&VkDescriptorSetAllocateInfo::pNext> : fexgen::custom_repack {};
@@ -817,6 +817,9 @@ template<> struct fex_gen_config<&VkDependencyInfo::pBufferMemoryBarriers> : fex
 template<> struct fex_gen_config<&VkDependencyInfo::pImageMemoryBarriers> : fexgen::custom_repack {};
 
 template<> struct fex_gen_config<&VkDescriptorUpdateTemplateCreateInfo::pDescriptorUpdateEntries> : fexgen::custom_repack {};
+
+// Union type
+template<> struct fex_gen_config<&VkDescriptorGetInfoEXT::data> : fexgen::custom_repack {};
 
 // These types have incompatible data layout but we use their layout wrappers elsewhere
 template<> struct fex_gen_type<VkWriteDescriptorSet> : fexgen::emit_layout_wrappers {};
@@ -1475,11 +1478,14 @@ template<> struct fex_gen_config<vkCreateCudaFunctionNV> {};
 template<> struct fex_gen_config<vkDestroyCudaModuleNV> {};
 template<> struct fex_gen_config<vkDestroyCudaFunctionNV> {};
 template<> struct fex_gen_config<vkCmdCudaLaunchKernelNV> {};
+#endif
 template<> struct fex_gen_config<vkGetDescriptorSetLayoutSizeEXT> {};
 template<> struct fex_gen_config<vkGetDescriptorSetLayoutBindingOffsetEXT> {};
 template<> struct fex_gen_config<vkGetDescriptorEXT> {};
+template<> struct fex_gen_param<vkGetDescriptorEXT, 3, void*> : fexgen::assume_compatible_data_layout {};
 template<> struct fex_gen_config<vkCmdBindDescriptorBuffersEXT> {};
 template<> struct fex_gen_config<vkCmdSetDescriptorBufferOffsetsEXT> {};
+#ifndef IS_32BIT_THUNK
 template<> struct fex_gen_config<vkCmdBindDescriptorBufferEmbeddedSamplersEXT> {};
 template<> struct fex_gen_config<vkGetBufferOpaqueCaptureDescriptorDataEXT> {};
 template<> struct fex_gen_config<vkGetImageOpaqueCaptureDescriptorDataEXT> {};
