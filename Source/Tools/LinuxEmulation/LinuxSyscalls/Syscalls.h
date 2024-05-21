@@ -349,6 +349,7 @@ private:
   struct MappedResource {
     using ContainerType = fextl::map<MRID, MappedResource>;
 
+    // Non-owning reference
     FEXCore::IR::AOTIRCacheEntry* AOTIRCacheEntry;
     // Pointer to lowest memory range this file is mapped to
     VMAEntry* FirstVMA;
