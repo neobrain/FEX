@@ -370,6 +370,8 @@ bool AOTIRCaptureCache::PostCompileCode(FEXCore::Core::InternalThreadState* Thre
     // Insert to caches if we generated IR
     if (GeneratedIR) {
       // If the IR doesn't need to be retained then we can just delete it now
+      // TODO: Does this use the correct delete?
+      // TODO: If we don't delete it here, who else owns the data?
       delete DebugData;
     }
   }

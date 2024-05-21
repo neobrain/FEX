@@ -348,6 +348,7 @@ private:
   struct MappedResource {
     using ContainerType = fextl::map<MRID, MappedResource>;
 
+    // Non-owning reference
     FEXCore::IR::AOTIRCacheEntry* AOTIRCacheEntry;
     VMAEntry* FirstVMA;
     uint64_t Length; // 0 if not fixed size

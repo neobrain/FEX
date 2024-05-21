@@ -216,6 +216,7 @@ if (ENABLE_ASAN)
   add_definitions(-DENABLE_ASAN=1)
   add_compile_options(-fno-omit-frame-pointer -fsanitize=address -fsanitize-address-use-after-scope)
   link_libraries(-fno-omit-frame-pointer -fsanitize=address -fsanitize-address-use-after-scope)
+  # TODO: Check that JEMALLOC is disabled and that THUNKS are disabled?
 endif()
 
 if (ENABLE_TSAN)

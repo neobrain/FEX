@@ -98,7 +98,7 @@ struct AOTIRInlineIndex {
 
 struct AOTIRCaptureCacheEntry {
   fextl::unique_ptr<FEXCore::Context::AOTIRWriter> Stream;
-  fextl::map<uint64_t, uint64_t> Index;
+  fextl::map<uint64_t, uint64_t> Index; // RIP to Stream offset
 
   void AppendAOTIRCaptureCache(uint64_t GuestRIP, uint64_t Start, uint64_t Length, uint64_t Hash, const FEXCore::IR::IRListView& IRList,
                                const FEXCore::IR::RegisterAllocationData* RAData);

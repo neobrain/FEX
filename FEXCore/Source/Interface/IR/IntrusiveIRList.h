@@ -388,11 +388,13 @@ public:
     return iterator(ListData, GetData(), Wrapped);
   }
 
+  // TODO: Why is this uintptr_t??
   [[nodiscard]]
   uintptr_t GetData() const {
     return reinterpret_cast<uintptr_t>(IRDataInternal ? IRDataInternal : InlineData);
   }
 
+  // TODO: Why is this uintptr_t??
   [[nodiscard]]
   uintptr_t GetListData() const {
     return reinterpret_cast<uintptr_t>(ListDataInternal ? ListDataInternal : &InlineData[DataSize]);
