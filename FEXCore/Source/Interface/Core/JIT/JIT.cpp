@@ -38,7 +38,8 @@ $end_info$
 #include <string.h>
 #include <limits>
 
-static constexpr size_t INITIAL_CODE_SIZE = 1024 * 1024 * 16;
+// static constexpr size_t INITIAL_CODE_SIZE = 1024 * 1024 * 16;
+static constexpr size_t INITIAL_CODE_SIZE = 1024 * 1024 * 128;
 // We don't want to move above 128MB atm because that means we will have to encode longer jumps
 static constexpr size_t MAX_CODE_SIZE = 1024 * 1024 * 128;
 
@@ -822,6 +823,7 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, const FEXCore
 
   // Put the block's RIP entry in the tail.
   // This will be used for RIP reconstruction in the future.
+  // NOTE: Cached code does not include the header and tail. These are regenerated on-the-fly instead. Hence, we don't need to worry about relocations here
   JITBlockTail->RIP = Entry;
   JITBlockTail->SpinLockFutex = 0;
 

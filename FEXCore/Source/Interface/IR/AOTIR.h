@@ -41,6 +41,7 @@ struct DebugData : public FEXCore::Allocator::FEXAllocOperators {
   uint64_t HostCodeSize; ///< The size of the code generated in the host JIT
   fextl::vector<DebugDataSubblock> Subblocks;
   fextl::vector<DebugDataGuestOpcode> GuestOpcodes;
+  // TODO: Try turning into std::optional<fextl::vector>?
   fextl::vector<FEXCore::CPU::Relocation>* Relocations;
 };
 } // namespace FEXCore::Core
@@ -140,7 +141,7 @@ public:
   bool PostCompileCode(FEXCore::Core::InternalThreadState* Thread, void* CodePtr, uint64_t GuestRIP, uint64_t StartAddr, uint64_t Length,
                        fextl::unique_ptr<FEXCore::IR::IRStorageBase> IR, FEXCore::Core::DebugData* DebugData, bool GeneratedIR);
 
-  AOTIRCacheEntry* LoadAOTIRCacheEntry(const fextl::string& filename);
+  AOTIRCacheEntry* LoadAOTIRCacheEntry(const fextl::string& filename, fextl::vector<uint8_t> FileId);
   void UnloadAOTIRCacheEntry(AOTIRCacheEntry* Entry);
 
   // Callbacks

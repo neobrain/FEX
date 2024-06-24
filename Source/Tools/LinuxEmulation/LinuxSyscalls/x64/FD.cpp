@@ -5,6 +5,7 @@ tags: LinuxSyscalls|syscalls-x86-64
 $end_info$
 */
 
+void FlushCodeCache();
 #include "LinuxSyscalls/FileManagement.h"
 #include "LinuxSyscalls/Syscalls.h"
 #include "LinuxSyscalls/x64/Syscalls.h"
@@ -128,6 +129,12 @@ void RegisterFD(FEX::HLE::SyscallHandler* Handler) {
   });
 
   REGISTER_SYSCALL_IMPL_X64(dup2, [](FEXCore::Core::CpuStateFrame* Frame, int oldfd, int newfd) -> uint64_t {
+    // If newfd already exists, it will be closed first. There is no indication
+    // to the caller whether this happens or not, so we can do it in a separate
+    // step.
+    if (oldfd != newfd && ::fcntl(newfd, F_GETFD) != -1 && ::fcntl(oldfd, F_GETFD) != -1) {
+      FEX::HLE::_SyscallHandler->FM.Close(newfd);
+    }
     uint64_t Result = ::dup2(oldfd, newfd);
     SYSCALL_ERRNO();
   });

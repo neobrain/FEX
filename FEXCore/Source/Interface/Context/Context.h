@@ -144,7 +144,7 @@ public:
   FEXCore::CPUID::XCRResults RunXCRFunction(uint32_t Function) override;
   FEXCore::CPUID::FunctionResults RunCPUIDFunctionName(uint32_t Function, uint32_t Leaf, uint32_t CPU) override;
 
-  FEXCore::IR::AOTIRCacheEntry* LoadAOTIRCacheEntry(const fextl::string& Name) override;
+  FEXCore::IR::AOTIRCacheEntry* LoadAOTIRCacheEntry(const fextl::string& Name, fextl::vector<uint8_t> FileId) override;
   void UnloadAOTIRCacheEntry(FEXCore::IR::AOTIRCacheEntry* Entry) override;
 
   void SetAOTIRLoader(AOTIRLoaderCBFn CacheReader) override {
@@ -360,9 +360,10 @@ private:
    * InitializeCompiler is called inside of CreateThread, so you likely don't need this
    */
   void InitializeCompiler(FEXCore::Core::InternalThreadState* Thread);
-
+public: // TODO: Privat-ize
   void AddBlockMapping(FEXCore::Core::InternalThreadState* Thread, uint64_t Address, void* Ptr);
 
+private:
   IR::AOTIRCaptureCache IRCaptureCache;
   fextl::unique_ptr<FEXCore::CodeSerialize::CodeObjectSerializeService> CodeObjectCacheService;
 

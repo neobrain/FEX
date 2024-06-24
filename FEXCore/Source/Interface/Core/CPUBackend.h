@@ -12,8 +12,10 @@ $end_info$
 #include <FEXCore/fextl/string.h>
 #include <FEXCore/fextl/vector.h>
 
+#include "ObjectCache/Relocations.h"
+
 #include <cstdint>
-#include <memory>
+#include <span>
 
 namespace FEXCore::CPU {
 union Relocation;

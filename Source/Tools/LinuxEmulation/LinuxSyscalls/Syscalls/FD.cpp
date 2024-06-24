@@ -5,6 +5,7 @@ tags: LinuxSyscalls|syscalls-shared
 $end_info$
 */
 
+void FlushCodeCache();
 #include "LinuxSyscalls/Syscalls.h"
 #include "LinuxSyscalls/x64/Syscalls.h"
 #include "LinuxSyscalls/x32/Syscalls.h"
@@ -81,6 +82,12 @@ void RegisterFD(FEX::HLE::SyscallHandler* Handler) {
   REGISTER_SYSCALL_IMPL_FLAGS(dup3, SyscallFlags::OPTIMIZETHROUGH | SyscallFlags::NOSYNCSTATEONENTRY,
                               [](FEXCore::Core::CpuStateFrame* Frame, int oldfd, int newfd, int flags) -> uint64_t {
                                 flags = FEX::HLE::RemapFromX86Flags(flags);
+                                // If newfd already exists, it will be closed first. There is no indication
+                                // to the caller whether this happens or not, so we can do it in a separate
+                                // step.
+                                if (oldfd != newfd && ::fcntl(newfd, F_GETFD) != -1 && ::fcntl(oldfd, F_GETFD) != -1) {
+                                  FEX::HLE::_SyscallHandler->FM.Close(newfd);
+                                }
                                 uint64_t Result = ::dup3(oldfd, newfd, flags);
                                 SYSCALL_ERRNO();
                               });
