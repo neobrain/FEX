@@ -8,6 +8,9 @@ enum class RelocationTypes : uint8_t {
   // Aligned to struct RelocNamedSymbolLiteral
   RELOC_NAMED_SYMBOL_LITERAL,
 
+  // TODO: Comment
+  RELOC_GUEST_RIP_LITERAL,
+
   // Fixed size named thunk move
   // 4 instruction constant generation on AArch64
   // 64-bit mov on x86-64
@@ -38,6 +41,17 @@ struct RelocNamedSymbolLiteral final {
 
   // Offset in to the code section to begin the relocation
   uint64_t Offset {};
+};
+
+struct RelocGuestRIPLiteral final {
+  RelocationTypeHeader Header {.Type = RelocationTypes::RELOC_GUEST_RIP_LITERAL};
+
+  // Offset in to the code section to begin the relocation
+  // TODO: Move to RelocationTypeHeader
+  uint64_t Offset {};
+
+  // The offset relative to the fragment entry point
+  uint64_t GuestEntryOffset;
 };
 
 struct RelocNamedThunkMove final {
@@ -72,6 +86,7 @@ union Relocation {
   RelocNamedSymbolLiteral NamedSymbolLiteral;
   // This makes our union of relocations at least 48 bytes
   // It might be more efficient to not use a union
+  // TODO: Make structs packed to reduce overall size?
   RelocNamedThunkMove NamedThunkMove;
 
   RelocGuestRIPMove GuestRIPMove;

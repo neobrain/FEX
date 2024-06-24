@@ -1,4 +1,4 @@
-list(APPEND LIBS FEXCore Common JemallocLibs)
+list(APPEND LIBS FEXCore Common JemallocLibs sqlite3)
 
 set (DEFINES)
 if (ENABLE_VIXL_SIMULATOR)

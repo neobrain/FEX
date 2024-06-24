@@ -66,7 +66,8 @@ static int64_t LREM(uint64_t SrcHigh, uint64_t SrcLow, int64_t Divisor) {
 }
 
 static void PrintValue(uint64_t Value) {
-  LogMan::Msg::DFmt("Value: 0x{:x}", Value);
+  fmt::print(stderr, "DEBUG VALUE: {:#x}\n", Value);
+  //  LogMan::Msg::DFmt("Value: 0x{:x}", Value);
 }
 
 static void PrintVectorValue(uint64_t Value, uint64_t ValueUpper) {
@@ -867,6 +868,21 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, const FEXCore
   this->IR = nullptr;
 
   return CodeData;
+}
+
+void* Arm64JITCore::RelocateJITObjectCode(uint64_t Entry, std::span<const char> HostCode, std::span<const Relocation> Relocations) {
+  auto RelocatedCode = GetCursorAddress<uint64_t*>();
+
+  if (GetCursorOffset() + HostCode.size_bytes() > CurrentCodeBuffer->Size) {
+    // TODO: ClearCodeCache?
+    ERROR_AND_DIE_FMT("NOT IMPLEMENTED");
+  }
+
+  memcpy(RelocatedCode, HostCode.data(), HostCode.size_bytes());
+
+  ApplyRelocations(Entry, reinterpret_cast<uintptr_t>(RelocatedCode), GetCursorOffset(), Relocations);
+
+  return RelocatedCode;
 }
 
 void Arm64JITCore::ResetStack() {

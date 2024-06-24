@@ -369,14 +369,18 @@ Ref OpDispatchBuilder::CalculateFlags_ADD(uint8_t SrcSize, Ref Src1, Ref Src2, b
   // Stash CF before stomping over it
   auto OldCFInv = UpdateCF ? nullptr : GetRFLAG(FEXCore::X86State::RFLAG_CF_RAW_LOC, true);
 
+  // _Print(_Constant(0 | (0x11fULL << 48)));
   HandleNZCVWrite();
+  // _Print(_Constant(0 | (0x120ULL << 48)));
 
   CalculateAF(Src1, Src2);
+  // _Print(_Constant(0 | (0x121ULL << 48)));
 
   Ref Res;
   if (SrcSize >= 4) {
     Res = _AddWithFlags(IR::SizeToOpSize(SrcSize), Src1, Src2);
   } else {
+    _Print(_Constant(0 | (0x123ULL << 48)));
     _AddNZCV(IR::SizeToOpSize(SrcSize), Src1, Src2);
     Res = _Add(OpSize::i32Bit, Src1, Src2);
   }

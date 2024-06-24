@@ -12,8 +12,10 @@ $end_info$
 #include <FEXCore/fextl/string.h>
 #include <FEXCore/fextl/vector.h>
 
+#include "ObjectCache/Relocations.h"
+
 #include <cstdint>
-#include <memory>
+#include <span>
 
 namespace FEXCore {
 
@@ -137,9 +139,7 @@ namespace CPU {
      * @return An executable function pointer relocated from the cache object
      */
     [[nodiscard]]
-    virtual void* RelocateJITObjectCode(uint64_t Entry, const CodeSerialize::CodeObjectFileSection* SerializationData) {
-      return nullptr;
-    }
+    virtual void* RelocateJITObjectCode(uint64_t Entry, std::span<const char> HostCode, std::span<const Relocation> Relocations) = 0;
 
     virtual void ClearCache() {}
 

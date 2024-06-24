@@ -44,6 +44,7 @@ DEF_OP(CallbackReturn) {
   ret();
 }
 
+// TODO: Apply relocations
 DEF_OP(ExitFunction) {
   auto Op = IROp->C<IR::IROp_ExitFunction>();
 
@@ -60,18 +61,22 @@ DEF_OP(ExitFunction) {
       br(TMP2);
     } else {
 #endif
-      ARMEmitter::SingleUseForwardLabel l_BranchHost;
-      ldr(TMP1, &l_BranchHost);
+      // ARMEmitter::SingleUseForwardLabel l_BranchHost;
+      auto l_BranchHost = InsertNamedSymbolLiteral(RelocNamedSymbolLiteral::NamedSymbol::SYMBOL_LITERAL_EXITFUNCTION_LINKER);
+      auto l_NewRIP = InsertGuestRIPLiteral(NewRIP);
+      ldr(TMP1, &l_BranchHost.Loc);
       blr(TMP1);
 
-      Bind(&l_BranchHost);
-      dc64(ThreadState->CurrentFrame->Pointers.Common.ExitFunctionLinker);
-      dc64(NewRIP);
+      PlaceNamedSymbolLiteral(l_BranchHost);
+      // Bind(&l_BranchHost);
+      // dc64(ThreadState->CurrentFrame->Pointers.Common.ExitFunctionLinker);
+      // dc64(NewRIP);
+      PlaceNamedSymbolLiteral(l_NewRIP);
 #ifdef _M_ARM_64EC
     }
 #endif
   } else {
-
+    // ERROR_AND_DIE_FMT("NOT IMPLEMENTED YET");
     ARMEmitter::SingleUseForwardLabel FullLookup;
     auto RipReg = GetReg(Op->NewRIP.ID());
 
