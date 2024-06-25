@@ -472,7 +472,10 @@ void Arm64Emitter::LoadConstant(ARMEmitter::Size s, ARMEmitter::Register Reg, ui
 
   // If the aligned offset is within the 4GB window then we can use ADRP+ADD
   // and the number of move segments more than 1
-  if (RequiredMoveSegments > 1 && ARMEmitter::Emitter::IsInt32(AlignedOffset)) {
+  // NOTE: This will turn guest addresses into host-relative offsets, which
+  //       is difficult (impossible?) to properly deal with for caching
+  const bool SupportCaching = true;
+  if (RequiredMoveSegments > 1 && ARMEmitter::Emitter::IsInt32(AlignedOffset) && !SupportCaching) {
     // If this is 4k page aligned then we only need ADRP
     if ((AlignedOffset & 0xFFF) == 0) {
       adrp(Reg, AlignedOffset >> 12);
