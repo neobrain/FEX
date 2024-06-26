@@ -872,6 +872,8 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, const FEXCore
 
 void* Arm64JITCore::RelocateJITObjectCode(uint64_t Entry, std::span<const char> HostCode, std::span<const Relocation> Relocations) {
   auto RelocatedCode = GetCursorAddress<uint64_t*>();
+  auto RelocatedCodeBeginOffset = GetCursorOffset();
+  auto RelocatedCodeEndOffset = GetCursorOffset() + HostCode.size_bytes();
 
   if (GetCursorOffset() + HostCode.size_bytes() > CurrentCodeBuffer->Size) {
     // TODO: ClearCodeCache?
@@ -880,7 +882,14 @@ void* Arm64JITCore::RelocateJITObjectCode(uint64_t Entry, std::span<const char> 
 
   memcpy(RelocatedCode, HostCode.data(), HostCode.size_bytes());
 
-  ApplyRelocations(Entry, reinterpret_cast<uintptr_t>(RelocatedCode), GetCursorOffset(), Relocations);
+  auto success = ApplyRelocations(Entry, reinterpret_cast<uintptr_t>(RelocatedCode), GetCursorOffset(), Relocations);
+  if (!success) {
+    SetCursorOffset(RelocatedCodeBeginOffset);
+    return nullptr;
+  }
+
+  // Restore cursor position
+  SetCursorOffset(RelocatedCodeEndOffset);
 
   return RelocatedCode;
 }
