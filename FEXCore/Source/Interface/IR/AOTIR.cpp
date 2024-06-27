@@ -209,10 +209,6 @@ void AOTIRCaptureCache::AOTIRCaptureCacheWriteoutQueue_Flush() {
   }
 
   for (;;) {
-    // This code is tricky to refactor so it doesn't allocate memory through glibc.
-    // The moved std::function object deallocates memory at the end of scope.
-    FEXCore::Allocator::YesIKnowImNotSupposedToUseTheGlibcAllocator glibc;
-
     AOTIRCaptureCacheWriteoutLock.lock();
     WriteOutFn fn = std::move(AOTIRCaptureCacheWriteoutQueue.front());
     bool MaybeEmpty = false;
