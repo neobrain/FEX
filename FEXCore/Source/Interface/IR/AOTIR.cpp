@@ -233,12 +233,12 @@ void AOTIRCaptureCache::AOTIRCaptureCacheWriteoutQueue_Flush() {
   LOGMAN_MSG_A_FMT("Must never get here");
 }
 
-void AOTIRCaptureCache::AOTIRCaptureCacheWriteoutQueue_Append(const WriteOutFn& fn) {
+void AOTIRCaptureCache::AOTIRCaptureCacheWriteoutQueue_Append(WriteOutFn fn) {
   bool Flush = false;
 
   {
     std::unique_lock lk {AOTIRCaptureCacheWriteoutLock};
-    AOTIRCaptureCacheWriteoutQueue.push(fn);
+    AOTIRCaptureCacheWriteoutQueue.push(std::move(fn));
     if (AOTIRCaptureCacheWriteoutQueue.size() > 10000) {
       Flush = true;
     }
@@ -340,9 +340,7 @@ bool AOTIRCaptureCache::PostCompileCode(FEXCore::Core::InternalThreadState* Thre
         auto LocalStartAddr = StartAddr - AOTIRCacheEntry.VAFileStart;
         auto FileId = AOTIRCacheEntry.Entry->FileId;
 
-        // The lambda is converted to std::function. This is tricky to refactor so it doesn't allocate memory through glibc.
         // NOTE: unique_ptr must be passed as a raw pointer since std::function requires lambda captures to be copyable
-        FEXCore::Allocator::YesIKnowImNotSupposedToUseTheGlibcAllocator glibc;
         AOTIRCaptureCacheWriteoutQueue_Append([this, LocalRIP, LocalStartAddr, Length, hash, IRRaw = IR.release(), FileId]() {
           fextl::unique_ptr<FEXCore::IR::IRStorageBase> IR(IRRaw);
 

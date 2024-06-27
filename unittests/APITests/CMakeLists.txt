@@ -3,6 +3,7 @@ set (TESTS
   ArgumentParser
   InterruptableConditionVariable
   Filesystem
+  fextl_function
   )
 
 list(APPEND LIBS FEXCore JemallocLibs)

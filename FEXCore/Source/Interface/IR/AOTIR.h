@@ -5,6 +5,7 @@
 #include "Interface/IR/IntrusiveIRList.h"
 
 #include <FEXCore/Config/Config.h>
+#include <FEXCore/fextl/functional.h>
 #include <FEXCore/fextl/map.h>
 #include <FEXCore/fextl/string.h>
 #include <FEXCore/fextl/queue.h>
@@ -12,7 +13,6 @@
 
 #include <atomic>
 #include <cstdint>
-#include <functional>
 #include <memory>
 #include <shared_mutex>
 #include <FEXCore/HLE/SourcecodeResolver.h>
@@ -118,14 +118,14 @@ using AOTCacheType = fextl::unordered_map<fextl::string, FEXCore::IR::AOTIRCache
 
 class AOTIRCaptureCache final {
 public:
-  using WriteOutFn = std::function<void()>;
+  using WriteOutFn = fextl::move_only_function<void()>;
 
   AOTIRCaptureCache(FEXCore::Context::ContextImpl* ctx)
     : CTX {ctx} {}
 
   void FinalizeAOTIRCache();
   void AOTIRCaptureCacheWriteoutQueue_Flush();
-  void AOTIRCaptureCacheWriteoutQueue_Append(const WriteOutFn& fn);
+  void AOTIRCaptureCacheWriteoutQueue_Append(WriteOutFn fn);
   void WriteFilesWithCode(const Context::AOTIRCodeFileWriterFn& Writer);
 
   struct PreGenerateIRFetchResult {
