@@ -340,10 +340,7 @@ bool AOTIRCaptureCache::PostCompileCode(FEXCore::Core::InternalThreadState* Thre
         auto LocalStartAddr = StartAddr - AOTIRCacheEntry.VAFileStart;
         auto FileId = AOTIRCacheEntry.Entry->FileId;
 
-        // NOTE: unique_ptr must be passed as a raw pointer since std::function requires lambda captures to be copyable
-        AOTIRCaptureCacheWriteoutQueue_Append([this, LocalRIP, LocalStartAddr, Length, hash, IRRaw = IR.release(), FileId]() {
-          fextl::unique_ptr<FEXCore::IR::IRStorageBase> IR(IRRaw);
-
+        AOTIRCaptureCacheWriteoutQueue_Append([this, LocalRIP, LocalStartAddr, Length, hash, IR = std::move(IR), FileId]() {
           // It is guaranteed via AOTIRCaptureCacheWriteoutLock and AOTIRCaptureCacheWriteoutFlusing that this will not run concurrently
           // Memory coherency is guaranteed via AOTIRCaptureCacheWriteoutLock
 
