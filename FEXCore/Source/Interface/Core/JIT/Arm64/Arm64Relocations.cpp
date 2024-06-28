@@ -64,16 +64,15 @@ auto Arm64JITCore::InsertGuestRIPLiteral(uint64_t GuestRIP) -> NamedSymbolLitera
     .Lit = GuestRIP,
     .MoveABI =
       {
-        .GuestRIPMove =
-          {
-            .Header =
-              {
-                .Type = FEXCore::CPU::RelocationTypes::RELOC_GUEST_RIP_LITERAL,
-              },
-            .Offset = 0,
-            // TODO: Initialize
-            // .GuestEntryOffset = GuestRIP - Entry,
-          },
+        .GuestRIPMove = {.Header =
+                           {
+                             .Type = FEXCore::CPU::RelocationTypes::RELOC_GUEST_RIP_LITERAL,
+                           },
+                         .Offset = 0,
+                         // TODO: Initialize properly, just setting value for debug now.
+                         // .GuestEntryOffset = GuestRIP - Entry,
+                         // .GuestEntryOffset = GuestRIP - Entry,
+                         .GuestRIP = GuestRIP - Entry},
       },
   };
   return Lit;
@@ -82,7 +81,23 @@ auto Arm64JITCore::InsertGuestRIPLiteral(uint64_t GuestRIP) -> NamedSymbolLitera
 void Arm64JITCore::PlaceNamedSymbolLiteral(NamedSymbolLiteralPair& Lit) {
   // Offset is the offset from the entrypoint of the block
   auto CurrentCursor = GetCursorAddress<uint8_t*>();
-  Lit.MoveABI.NamedSymbolLiteral.Offset = CurrentCursor - CodeData.BlockEntry;
+  switch (Lit.MoveABI.Header.Type) {
+  case RelocationTypes::RELOC_NAMED_SYMBOL_LITERAL: {
+    // TODO: Switch back to BlockBegin
+    Lit.MoveABI.NamedSymbolLiteral.Offset = CurrentCursor - CodeData.BlockEntry;
+    break;
+  }
+
+  case RelocationTypes::RELOC_GUEST_RIP_LITERAL: {
+    // TODO: Switch back to BlockBegin
+    Lit.MoveABI.GuestRIPMove.Offset = CurrentCursor - CodeData.BlockEntry;
+    fmt::print(stderr, "  EMITTING RELOCATION AT OFFSET {:#x} for guest rip {:#x} with literal {:#x}\n",
+               CurrentCursor - CodeData.BlockEntry, Lit.MoveABI.GuestRIPMove.GuestRIP + Entry, Lit.Lit);
+    break;
+  }
+
+  default: ERROR_AND_DIE_FMT("UNKNOWN RELOCATION TYPE FOR PLACENAMEDSYMBOLLITERAL\n");
+  }
 
   Bind(&Lit.Loc);
   dc64(Lit.Lit);
@@ -132,14 +147,33 @@ bool Arm64JITCore::ApplyRelocations(uint64_t GuestEntry, uint64_t CodeEntry, uin
     case FEXCore::CPU::RelocationTypes::RELOC_GUEST_RIP_MOVE: {
       // XXX: Reenable once the JIT Object Cache is upstream
       // XXX: Should spin the relocation list, create a list of guest RIP moves, and ask for them all once, reduces lock contention.
-      uint64_t Pointer = ~0ULL; // EmitterCTX->JITObjectCache->FindRelocatedRIP(Reloc->GuestRIPMove.GuestRIP);
-      if (Pointer == ~0ULL) {
-        return false;
-      }
+      fextl::fmt::print(stderr, "  at {:#x}: move RIP {:#x} (at host {:#x})\n", Reloc.GuestRIPMove.Offset, Reloc.GuestRIPMove.GuestRIP,
+                        CursorEntry + Reloc.GuestRIPMove.Offset);
 
-      // Relocation occurs at the cursorEntry + offset relative to that cursor.
+      // ERROR_AND_DIE_FMT("Did we implement this?");
+      // TODO: err... recompute the RIP properly!
+      uint64_t Pointer = /*EmitterCTX->JITObjectCache->FindRelocatedRIP*/ (Reloc.GuestRIPMove.GuestRIP);
+      // if (Pointer == ~0ULL) {
+      //   if (j < 1 || GuestEntry == 0x7ffffffe280e) {
+      //     continue;
+      //   } else {
+      //     // return false;
+      //   }
+      // }
+
+      // Re-emit constant in case it requires more/fewer instructions at the new location
       SetCursorOffset(CursorEntry + Reloc.GuestRIPMove.Offset);
       LoadConstant(ARMEmitter::Size::i64Bit, ARMEmitter::Register(Reloc.GuestRIPMove.RegisterIndex), Pointer, true);
+      break;
+    }
+
+    case FEXCore::CPU::RelocationTypes::RELOC_GUEST_RIP_LITERAL: {
+      // TODO: For this to function, I think the page alignment of arm code within the original host page and the new host page must be the same?
+
+      fextl::fmt::print(stderr, "  GUEST_RIP_LITERAL patching host addr {:#x} / {:#x}: RIP {:#x}\n", Reloc.GuestRIPMove.Offset,
+                        CodeEntry + Reloc.GuestRIPMove.Offset, Reloc.GuestRIPMove.GuestRIP);
+      SetCursorOffset(CursorEntry + Reloc.GuestRIPMove.Offset);
+      dc64(GuestEntry + Reloc.GuestRIPMove.GuestRIP);
       break;
     }
     default: ERROR_AND_DIE_FMT("Unknown relocation type {}", ToUnderlying(Reloc.Header.Type));

@@ -634,15 +634,12 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
           Thread->OpDispatcher->_GuestOpcode(Block.Entry + BlockInstructionsLength - GuestRIP);
         }
 
-        Thread->OpDispatcher->_Print(Thread->OpDispatcher->_Constant(DecodedInfo->PC));
         if (Config.SMCChecks == FEXCore::Config::CONFIG_SMC_FULL) {
           auto ExistingCodePtr = reinterpret_cast<uint64_t*>(Block.Entry + BlockInstructionsLength);
 
-          Thread->OpDispatcher->_Print(Thread->OpDispatcher->_Constant(DecodedInfo->PC | (0x1ULL << 48)));
           auto CodeChanged = Thread->OpDispatcher->_ValidateCode(ExistingCodePtr[0], ExistingCodePtr[1],
                                                                  (uintptr_t)ExistingCodePtr - GuestRIP, DecodedInfo->InstSize);
 
-          Thread->OpDispatcher->_Print(Thread->OpDispatcher->_Constant(DecodedInfo->PC | (0x2ULL << 48)));
           auto InvalidateCodeCond = Thread->OpDispatcher->CondJump(CodeChanged);
 
           auto CurrentBlock = Thread->OpDispatcher->GetCurrentBlock();
@@ -651,7 +648,6 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
 
           Thread->OpDispatcher->SetCurrentCodeBlock(CodeWasChangedBlock);
           Thread->OpDispatcher->_ThreadRemoveCodeEntry();
-          Thread->OpDispatcher->_Print(Thread->OpDispatcher->_Constant(DecodedInfo->PC | (0x3ULL << 48)));
           Thread->OpDispatcher->ExitFunction(
             Thread->OpDispatcher->_EntrypointOffset(IR::SizeToOpSize(GPRSize), Block.Entry + BlockInstructionsLength - GuestRIP));
 
@@ -659,17 +655,13 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
 
           Thread->OpDispatcher->SetFalseJumpTarget(InvalidateCodeCond, NextOpBlock);
           Thread->OpDispatcher->SetCurrentCodeBlock(NextOpBlock);
-          Thread->OpDispatcher->_Print(Thread->OpDispatcher->_Constant(DecodedInfo->PC | (0x4ULL << 48)));
         }
 
         if (TableInfo && TableInfo->OpcodeDispatcher) {
           auto Fn = TableInfo->OpcodeDispatcher;
           Thread->OpDispatcher->ResetHandledLock();
-          Thread->OpDispatcher->_Print(Thread->OpDispatcher->_Constant(DecodedInfo->PC | (0x5ULL << 48)));
           Thread->OpDispatcher->ResetDecodeFailure();
-          Thread->OpDispatcher->_Print(Thread->OpDispatcher->_Constant(DecodedInfo->PC | (0x6ULL << 48)));
           std::invoke(Fn, Thread->OpDispatcher, DecodedInfo);
-          // Thread->OpDispatcher->_Print(Thread->OpDispatcher->_Constant(DecodedInfo->PC | (0x7ULL << 48)));
           if (Thread->OpDispatcher->HadDecodeFailure()) {
             HadDispatchError = true;
           } else {
@@ -686,12 +678,10 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
             LogMan::Msg::EFmt("Invalid or Unknown instruction: {} 0x{:x}", TableInfo->Name ?: "UND", Block.Entry - GuestRIP);
           }
           // Invalid instruction
-          Thread->OpDispatcher->_Print(Thread->OpDispatcher->_Constant(DecodedInfo->PC | (0x7ULL << 48)));
           Thread->OpDispatcher->InvalidOp(DecodedInfo);
           Thread->OpDispatcher->ExitFunction(Thread->OpDispatcher->_EntrypointOffset(IR::SizeToOpSize(GPRSize), Block.Entry - GuestRIP));
         }
 
-        // Thread->OpDispatcher->_Print(Thread->OpDispatcher->_Constant(DecodedInfo->PC | (0x8ULL << 48)));
         const bool NeedsBlockEnd =
           (HadDispatchError && TotalInstructions > 0) || (Thread->OpDispatcher->NeedsBlockEnder() && i + 1 == InstsInBlock);
 
@@ -706,19 +696,15 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
           const uint8_t GPRSize = GetGPRSize();
 
           // We had some instructions. Early exit
-          Thread->OpDispatcher->_Print(Thread->OpDispatcher->_Constant(DecodedInfo->PC));
           Thread->OpDispatcher->ExitFunction(
             Thread->OpDispatcher->_EntrypointOffset(IR::SizeToOpSize(GPRSize), Block.Entry + BlockInstructionsLength - GuestRIP));
           break;
         }
 
 
-        // Thread->OpDispatcher->_Print(Thread->OpDispatcher->_Constant(DecodedInfo->PC | (0x9ULL << 48)));
         if (Thread->OpDispatcher->FinishOp(DecodedInfo->PC + DecodedInfo->InstSize, i + 1 == InstsInBlock)) {
-          Thread->OpDispatcher->_Print(Thread->OpDispatcher->_Constant(DecodedInfo->PC | (0xaULL << 48)));
           break;
         }
-        // Thread->OpDispatcher->_Print(Thread->OpDispatcher->_Constant(DecodedInfo->PC | (0xbULL << 48)));
       }
     }
 
@@ -778,42 +764,41 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
   // }
 
   FEX_CONFIG_OPT(TelemetryDisabled, DISABLETELEMETRY);
-  if (TelemetryDisabled() && false) {
+  if (TelemetryDisabled()) {
     auto GuestRIPLookup = SyscallHandler->LookupAOTIRCacheEntry(Thread, GuestRIP);
     if (GuestRIPLookup.Entry && !GuestRIPLookup.Entry->Filename.empty()) {
       auto filename = std::filesystem::path {GuestRIPLookup.Entry->Filename}.filename().string();
-      fextl::fmt::print(stderr, "LOOKING UP: {} <- {:#x}\n", filename, GuestRIP);
+      fextl::fmt::print(stderr, "LOOKING UP: {} <- {:#x} (ELF off {:#x})\n", filename, GuestRIP, GuestRIP - GuestRIPLookup.VAFileStart);
 
       // std::invoke([&]() {
       sqlite3* db;
       auto ret = sqlite3_open(("/tmp/fexcache/" + filename + ".db").c_str(), &db);
       if (ret) {
-        fextl::fmt::print(stderr, "FAILED TO OPEN SQLITE DATABASE\n");
-        // return;
+        ERROR_AND_DIE_FMT("FAILED TO OPEN SQLITE DATABASE\n");
       }
 
       sqlite3_stmt* stmt;
-      ret = sqlite3_prepare_v2(db, "SELECT code, host_addr, relocations FROM blocks WHERE addr = ?", -1, &stmt, nullptr);
+      ret = sqlite3_prepare_v2(db, "SELECT code, orig_guest_addr, host_addr, relocations FROM blocks WHERE guest_offset = ?", -1, &stmt, nullptr);
       if (ret) {
-        fextl::fmt::print(stderr, "FAILED TO PREPARE CREATE SELECT STATEMENT: {}\n", sqlite3_errstr(ret));
-        // return;
+        ERROR_AND_DIE_FMT("FAILED TO PREPARE CREATE SELECT STATEMENT: {}\n", sqlite3_errstr(ret));
       }
-      ret = sqlite3_bind_int64(stmt, 1, GuestRIP);
+      ret = sqlite3_bind_int64(stmt, 1, GuestRIP - GuestRIPLookup.VAFileStart);
       if (ret) {
-        fextl::fmt::print(stderr, "FAILED TO BIND INT\n");
-        // return;
+        ERROR_AND_DIE_FMT("FAILED TO BIND INT\n");
       }
 
       ret = sqlite3_step(stmt);
       if (ret == SQLITE_ROW) {
         auto blob = (const char*)sqlite3_column_blob(stmt, 0);
-        auto OrigHostAddr = sqlite3_column_int64(stmt, 1);
+        auto OrigGuestAddr = sqlite3_column_int64(stmt, 1);
+        auto OrigHostAddr = sqlite3_column_int64(stmt, 2);
         auto HostSize = sqlite3_column_bytes(stmt, 0);
 
-        auto Relocations = (const CPU::Relocation*)sqlite3_column_blob(stmt, 2);
-        auto NumRelocations = sqlite3_column_bytes(stmt, 2) / sizeof(CPU::Relocation);
+        auto Relocations = (const CPU::Relocation*)sqlite3_column_blob(stmt, 3);
+        auto NumRelocations = sqlite3_column_bytes(stmt, 3) / sizeof(CPU::Relocation);
 
-        fextl::fmt::print(stderr, "Got row for addr {:#x}: {:#x} bytes {}\n", GuestRIP, HostSize, fmt::ptr(sqlite3_column_blob(stmt, 0)));
+        fextl::fmt::print(stderr, "Got row for offset {:#x}: {:#x} bytes guest {:#x} -> host {:#x} {}\n", GuestRIP - GuestRIPLookup.VAFileStart,
+                          HostSize, OrigGuestAddr, OrigHostAddr, fmt::ptr(sqlite3_column_blob(stmt, 0)));
 
         fextl::fmt::print(stderr, "  {:02x}\n", fmt::join(blob, blob + HostSize, ""));
         fextl::fmt::print(stderr, "  {:02x}\n",
@@ -845,9 +830,10 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
             .Length = 0,          // Unused
           };
         }
+      } else if (ret == SQLITE_DONE) {
+        ERROR_AND_DIE_FMT("Cache query returned no results: {}\n", sqlite3_errstr(ret));
       } else if (ret) {
-        fextl::fmt::print(stderr, "FAILED TO RUN STATEMENT: {}\n", sqlite3_errstr(ret));
-        // return;
+        ERROR_AND_DIE_FMT("FAILED TO RUN SELECT STATEMENT: {}{}\n", ret, sqlite3_errstr(ret));
       }
       sqlite3_finalize(stmt);
 
@@ -931,8 +917,14 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
     auto GuestRIPLookup = SyscallHandler->LookupAOTIRCacheEntry(Thread, GuestRIP);
     if (!GuestRIPLookup.Entry->Filename.empty()) {
       auto filename = std::filesystem::path {GuestRIPLookup.Entry->Filename}.filename().string();
-      fextl::fmt::print(stderr, "APPENDING TO: {} <- {:#x} ({})\n", filename, GuestRIP, DebugData->HostCodeSize);
+      fextl::fmt::print(stderr, "APPENDING TO: {} <- {:#x} ({}) (host ptr {})\n", filename, GuestRIP, DebugData->HostCodeSize, fmt::ptr(CodePtr));
       mkdir("/tmp/fexcache", 0700);
+
+      if (GuestRIP < GuestRIPLookup.VAFileStart) {
+        ERROR_AND_DIE_FMT("Invalid guest offset");
+      }
+
+      // TODO: It seems that CodePtr points to BlockEntry, but really we should cache all data starting from BlockBegin?
 
       fextl::fmt::print(stderr, "  {:02x}\n", fmt::join((char*)CodePtr, (char*)CodePtr + DebugData->HostCodeSize, ""));
 
@@ -940,75 +932,74 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
         sqlite3* db;
         auto ret = sqlite3_open(("/tmp/fexcache/" + filename + ".db").c_str(), &db);
         if (ret) {
-          fextl::fmt::print(stderr, "FAILED TO OPEN SQLITE DATABASE\n");
+          ERROR_AND_DIE_FMT("FAILED TO OPEN SQLITE DATABASE\n");
         }
 
         sqlite3_stmt* stmt;
         ret = sqlite3_prepare_v2(db,
-                                 "CREATE TABLE IF NOT EXISTS blocks (addr INTEGER PRIMARY KEY, host_addr INTEGER NOT NULL, code BLOB NOT "
-                                 "NULL, guest_code BLOB NOT NULL, ir TEXT NOT NULL, relocations BLOB)",
+                                 "CREATE TABLE IF NOT EXISTS blocks (guest_offset INTEGER PRIMARY KEY, orig_guest_addr INTEGER NOT NULL, "
+                                 "host_addr INTEGER NOT NULL, code BLOB NOT NULL, guest_code BLOB NOT NULL, ir TEXT NOT NULL, relocations "
+                                 "BLOB)",
                                  -1, &stmt, nullptr);
         if (ret) {
-          fextl::fmt::print(stderr, "FAILED TO PREPARE CREATE STATEMENT\n");
+          ERROR_AND_DIE_FMT("FAILED TO PREPARE CREATE STATEMENT\n");
         }
 
         ret = sqlite3_step(stmt);
         if (ret == SQLITE_DONE) {
         } else if (ret) {
-          fextl::fmt::print(stderr, "FAILED TO RUN CREATE STATEMENT: {}, {}\n", ret, sqlite3_errstr(ret));
+          ERROR_AND_DIE_FMT("FAILED TO RUN CREATE STATEMENT: {}, {}\n", ret, sqlite3_errstr(ret));
         }
         sqlite3_finalize(stmt);
 
         ret = sqlite3_prepare_v2(db,
-                                 // "INSERT OR " /*IGNORE*/ "REPLACE INTO blocks (addr, host_addr, code, guest_code, ir, relocations) VALUES "
-                                 "INSERT OR IGNORE INTO blocks (addr, host_addr, code, guest_code, ir, relocations) VALUES "
-                                 "(?, ?, ?, ?, ?, ?)",
+                                 "INSERT OR " /*IGNORE*/ "REPLACE INTO blocks (guest_offset, orig_guest_addr, host_addr, code, guest_code, "
+                                 "ir, relocations) "
+                                 "VALUES "
+                                 "(?, ?, ?, ?, ?, ?, ?)",
                                  -1, &stmt, nullptr);
         if (ret) {
-          fextl::fmt::print(stderr, "FAILED TO PREPARE CREATE INSERT STATEMENT: {}\n", sqlite3_errstr(ret));
+          ERROR_AND_DIE_FMT("FAILED TO PREPARE CREATE INSERT STATEMENT: {}\n", sqlite3_errstr(ret));
         }
-        ret = sqlite3_bind_int64(stmt, 1, GuestRIP);
+        ret = sqlite3_bind_int64(stmt, 1, GuestRIP - GuestRIPLookup.VAFileStart);
         if (ret) {
-          fextl::fmt::print(stderr, "FAILED TO BIND INT\n");
+          ERROR_AND_DIE_FMT("FAILED TO BIND INT\n");
         }
-        ret = sqlite3_bind_int64(stmt, 2, reinterpret_cast<uintptr_t>(CodePtr));
+        ret = sqlite3_bind_int64(stmt, 2, GuestRIP);
         if (ret) {
-          fextl::fmt::print(stderr, "FAILED TO BIND INT\n");
+          ERROR_AND_DIE_FMT("FAILED TO BIND INT\n");
         }
-        ret = sqlite3_bind_blob(stmt, 3, CodePtr, DebugData->HostCodeSize, SQLITE_STATIC);
+        ret = sqlite3_bind_int64(stmt, 3, reinterpret_cast<uintptr_t>(CodePtr));
         if (ret) {
-          fextl::fmt::print(stderr, "FAILED TO BIND BLOB\n");
+          ERROR_AND_DIE_FMT("FAILED TO BIND INT\n");
         }
-        ret = sqlite3_bind_blob(stmt, 4, (void*)GuestRIP, Length, SQLITE_STATIC);
+        ret = sqlite3_bind_blob(stmt, 4, CodePtr, DebugData->HostCodeSize, SQLITE_STATIC);
         if (ret) {
-          fextl::fmt::print(stderr, "FAILED TO BIND BLOB\n");
+          ERROR_AND_DIE_FMT("FAILED TO BIND BLOB\n");
+        }
+        ret = sqlite3_bind_blob(stmt, 5, (void*)GuestRIP, Length, SQLITE_STATIC);
+        if (ret) {
+          ERROR_AND_DIE_FMT("FAILED TO BIND BLOB\n");
         }
         fextl::stringstream ss;
         auto IRView = IR->GetIRView();
         FEXCore::IR::Dump(&ss, &IRView, IR->RAData());
-        ret = sqlite3_bind_text(stmt, 5, ss.str().c_str(), -1, SQLITE_STATIC);
+        ret = sqlite3_bind_text(stmt, 6, ss.str().c_str(), -1, SQLITE_STATIC);
         if (ret) {
-          fextl::fmt::print(stderr, "FAILED TO BIND BLOB\n");
+          ERROR_AND_DIE_FMT("FAILED TO BIND BLOB\n");
         }
-        ret = sqlite3_bind_blob(stmt, 6, DebugData->Relocations ? (void*)DebugData->Relocations->data() : nullptr,
+        ret = sqlite3_bind_blob(stmt, 7, DebugData->Relocations ? (void*)DebugData->Relocations->data() : nullptr,
                                 DebugData->Relocations ? std::span<CPU::Relocation> {*DebugData->Relocations}.size_bytes() : 0, SQLITE_STATIC);
         if (ret) {
-          fextl::fmt::print(stderr, "FAILED TO BIND BLOB\n");
+          ERROR_AND_DIE_FMT("FAILED TO BIND BLOB\n");
         }
         static_assert(sizeof(DebugData->Relocations[0]) == 24);
-        if (DebugData->Relocations && !DebugData->Relocations->empty()) {
-          for (auto& reloc : *DebugData->Relocations) {
-            fextl::fmt::print(stderr, "reloc: {}\n", (int)reloc.Header.Type);
-          }
-        } else {
-          fextl::fmt::print(stderr, "No relocations\n");
-        }
 
         ret = sqlite3_step(stmt);
         if (ret == SQLITE_DONE) {
           fextl::fmt::print(stderr, "Row inserted\n");
         } else if (ret) {
-          fextl::fmt::print(stderr, "FAILED TO RUN STATEMENT: {}\n", sqlite3_errstr(ret));
+          ERROR_AND_DIE_FMT("FAILED TO RUN STATEMENT: {}\n", sqlite3_errstr(ret));
         }
         sqlite3_finalize(stmt);
 
