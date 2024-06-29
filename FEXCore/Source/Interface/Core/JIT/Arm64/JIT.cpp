@@ -66,7 +66,7 @@ static int64_t LREM(uint64_t SrcHigh, uint64_t SrcLow, int64_t Divisor) {
 }
 
 static void PrintValue(uint64_t Value) {
-  fmt::print(stderr, "DEBUG VALUE: {:#x}\n", Value);
+  fextl::fmt::print(stderr, "DEBUG VALUE: {:#x}\n", Value);
   //  LogMan::Msg::DFmt("Value: 0x{:x}", Value);
 }
 
@@ -808,8 +808,7 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, const FEXCore
 
   // Put the block's RIP entry in the tail.
   // This will be used for RIP reconstruction in the future.
-  // TODO: This needs to be a data RIP relocation once code caching works.
-  //   Current relocation code doesn't support this feature yet.
+  // NOTE: Cached code does not include the header and tail. These are regenerated on-the-fly instead. Hence, we don't need to worry about relocations here
   JITBlockTail->RIP = Entry;
   JITBlockTail->SpinLockFutex = 0;
 
@@ -871,7 +870,8 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, const FEXCore
 }
 
 void* Arm64JITCore::RelocateJITObjectCode(uint64_t Entry, std::span<const char> HostCode, std::span<const Relocation> Relocations) {
-  auto RelocatedCode = GetCursorAddress<uint64_t*>();
+  dc32(sizeof(JITCodeHeader) + HostCode.size_bytes()); // JITCodeHeader
+  auto RelocatedCode = GetCursorAddress<uint8_t*>();
   auto RelocatedCodeBeginOffset = GetCursorOffset();
   auto RelocatedCodeEndOffset = GetCursorOffset() + HostCode.size_bytes();
 
@@ -890,6 +890,10 @@ void* Arm64JITCore::RelocateJITObjectCode(uint64_t Entry, std::span<const char> 
 
   // Restore cursor position
   SetCursorOffset(RelocatedCodeEndOffset);
+
+  dc32(Entry); // JITCodeTail
+  CPU.EnsureIAndDCacheCoherency(reinterpret_cast<void*>(RelocatedCode - sizeof(JITCodeHeader)),
+                                HostCode.size_bytes() + sizeof(JITCodeHeader) + sizeof(JITCodeTail));
 
   return RelocatedCode;
 }

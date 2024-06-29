@@ -599,7 +599,7 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
       // Reset any block-specific state
       Thread->OpDispatcher->StartNewBlock();
 
-      Thread->OpDispatcher->_Print(Thread->OpDispatcher->_Constant(0xdeadb00f));
+      // Thread->OpDispatcher->_Print(Thread->OpDispatcher->_Constant(0xdeadb00f));
 
       uint64_t InstsInBlock = Block.NumInstructions;
 
@@ -830,10 +830,10 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
             .Length = 0,          // Unused
           };
         }
-      } else if (ret == SQLITE_DONE) {
-        ERROR_AND_DIE_FMT("Cache query returned no results: {}\n", sqlite3_errstr(ret));
-      } else if (ret) {
+      } else if (ret != SQLITE_DONE) {
         ERROR_AND_DIE_FMT("FAILED TO RUN SELECT STATEMENT: {}{}\n", ret, sqlite3_errstr(ret));
+      } else if (ret) {
+        fextl::fmt::print(stderr, "Cache query returned no results: {}\n", sqlite3_errstr(ret));
       }
       sqlite3_finalize(stmt);
 
