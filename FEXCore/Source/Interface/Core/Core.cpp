@@ -771,11 +771,23 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
       fextl::fmt::print(stderr, "LOOKING UP: {} <- {:#x} (ELF off {:#x})\n", filename, GuestRIP, GuestRIP - GuestRIPLookup.VAFileStart);
 
       // std::invoke([&]() {
+      // TODO: Enable WAL for better concurrency (also consider PRAGMA schema.synchronous = NONE)
+
+      // TODO: Add table for cache version (FEX build etc)
+      // TODO: Add table for statistics (cache hits / misses, etc)
+
       sqlite3* db;
-      auto ret = sqlite3_open(("/tmp/fexcache/" + filename + ".db").c_str(), &db);
+      auto ret = sqlite3_open_v2(("/tmp/fexcache/" + filename + ".db").c_str(), &db, SQLITE_OPEN_READONLY, nullptr);
       if (ret) {
         ERROR_AND_DIE_FMT("FAILED TO OPEN SQLITE DATABASE\n");
       }
+
+      sqlite3_busy_handler(db, [](void*, int attempt) {
+        // TODO: Consider falling back to re-compiling the current block instead of waiting
+        fextl::fmt::print(stderr, "DATABASE IS BUSY, RETRYING... (attempt {})\n", attempt);
+        std::this_thread::yield();
+        return 1;
+      }, nullptr);
 
       sqlite3_stmt* stmt;
       ret = sqlite3_prepare_v2(db, "SELECT code, orig_guest_addr, host_addr, relocations FROM blocks WHERE guest_offset = ?", -1, &stmt, nullptr);
@@ -935,6 +947,12 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
           ERROR_AND_DIE_FMT("FAILED TO OPEN SQLITE DATABASE\n");
         }
 
+        sqlite3_busy_handler(db, [](void*, int attempt) {
+          fextl::fmt::print(stderr, "DATABASE IS BUSY, RETRYING... (attempt {})\n", attempt);
+          std::this_thread::yield();
+          return 1;
+        }, nullptr);
+
         sqlite3_stmt* stmt;
         ret = sqlite3_prepare_v2(db,
                                  "CREATE TABLE IF NOT EXISTS blocks (guest_offset INTEGER PRIMARY KEY, orig_guest_addr INTEGER NOT NULL, "
@@ -942,13 +960,13 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
                                  "BLOB)",
                                  -1, &stmt, nullptr);
         if (ret) {
-          ERROR_AND_DIE_FMT("FAILED TO PREPARE CREATE STATEMENT\n");
+          ERROR_AND_DIE_FMT("FAILED TO PREPARE CREATE STATEMENT: {} ({})\n", sqlite3_errstr(ret), ret);
         }
 
         ret = sqlite3_step(stmt);
         if (ret == SQLITE_DONE) {
         } else if (ret) {
-          ERROR_AND_DIE_FMT("FAILED TO RUN CREATE STATEMENT: {}, {}\n", ret, sqlite3_errstr(ret));
+          ERROR_AND_DIE_FMT("FAILED TO RUN CREATE STATEMENT: {} ({})\n", sqlite3_errstr(ret), ret);
         }
         sqlite3_finalize(stmt);
 
@@ -999,7 +1017,7 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
         if (ret == SQLITE_DONE) {
           fextl::fmt::print(stderr, "Row inserted\n");
         } else if (ret) {
-          ERROR_AND_DIE_FMT("FAILED TO RUN STATEMENT: {}\n", sqlite3_errstr(ret));
+          ERROR_AND_DIE_FMT("FAILED TO RUN STATEMENT: {} ({})\n", sqlite3_errstr(ret), ret);
         }
         sqlite3_finalize(stmt);
 
