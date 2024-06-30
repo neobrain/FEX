@@ -779,7 +779,8 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
       sqlite3* db;
       auto ret = sqlite3_open_v2(("/tmp/fexcache/" + filename + ".db").c_str(), &db, SQLITE_OPEN_READONLY, nullptr);
       if (ret) {
-        ERROR_AND_DIE_FMT("FAILED TO OPEN SQLITE DATABASE\n");
+        fextl::fmt::print(stderr, "FAILED TO OPEN SQLITE DATABASE, skipping load\n");
+        goto skip_load_cache;
       }
 
       sqlite3_busy_handler(db, [](void*, int attempt) {
@@ -850,6 +851,7 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
       sqlite3_finalize(stmt);
 
       sqlite3_close(db);
+skip_load_cache:;
     }
   }
 

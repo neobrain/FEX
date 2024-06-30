@@ -870,15 +870,14 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, const FEXCore
 }
 
 void* Arm64JITCore::RelocateJITObjectCode(uint64_t Entry, std::span<const char> HostCode, std::span<const Relocation> Relocations) {
+  if (GetCursorOffset() + HostCode.size_bytes() + sizeof(JITCodeHeader) + sizeof(JITCodeTail) > CurrentCodeBuffer->Size) {
+    CTX->ClearCodeCache(ThreadState);
+  }
+
   dc32(sizeof(JITCodeHeader) + HostCode.size_bytes()); // JITCodeHeader
   auto RelocatedCode = GetCursorAddress<uint8_t*>();
   auto RelocatedCodeBeginOffset = GetCursorOffset();
   auto RelocatedCodeEndOffset = GetCursorOffset() + HostCode.size_bytes();
-
-  if (GetCursorOffset() + HostCode.size_bytes() > CurrentCodeBuffer->Size) {
-    // TODO: ClearCodeCache?
-    ERROR_AND_DIE_FMT("NOT IMPLEMENTED");
-  }
 
   memcpy(RelocatedCode, HostCode.data(), HostCode.size_bytes());
 
