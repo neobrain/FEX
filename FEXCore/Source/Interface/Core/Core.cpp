@@ -931,7 +931,7 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
   const bool EnableNewCodeCache = true;
   if (EnableNewCodeCache && DebugData) {
     auto GuestRIPLookup = SyscallHandler->LookupAOTIRCacheEntry(Thread, GuestRIP);
-    if (!GuestRIPLookup.Entry->Filename.empty() && GuestRIPLookup.Entry->FileId < limiter) {
+    if (GuestRIPLookup.Entry && !GuestRIPLookup.Entry->Filename.empty() && GuestRIPLookup.Entry->FileId < limiter) {
       const auto& filename = GuestRIPLookup.Entry->FileId;
       fextl::fmt::print(stderr, "APPENDING TO: {} <- {:#x} ({}) (host ptr {}, ELF off {:#x})\n", filename, GuestRIP,
                         DebugData->HostCodeSize, fmt::ptr(CodePtr), GuestRIP - GuestRIPLookup.VAFileStart);
