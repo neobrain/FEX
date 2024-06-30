@@ -4043,8 +4043,7 @@ void OpDispatchBuilder::CheckLegacySegmentRead(Ref NewNode, uint32_t SegmentReg)
     return;
   }
 
-  // if (CTX->Config.DisableTelemetry()) {
-  if (false) {
+  if (CTX->Config.DisableTelemetry()) {
     // Telemetry disabled at runtime.
     return;
   }
@@ -4082,8 +4081,7 @@ void OpDispatchBuilder::CheckLegacySegmentWrite(Ref NewNode, uint32_t SegmentReg
     return;
   }
 
-  // if (CTX->Config.DisableTelemetry()) {
-  if (false) {
+  if (CTX->Config.DisableTelemetry()) {
     // Telemetry disabled at runtime.
     return;
   }

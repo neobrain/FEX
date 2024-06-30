@@ -763,8 +763,7 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
   //   }
   // }
 
-  FEX_CONFIG_OPT(TelemetryDisabled, DISABLETELEMETRY);
-  if (TelemetryDisabled()) {
+  if (true) {
     auto GuestRIPLookup = SyscallHandler->LookupAOTIRCacheEntry(Thread, GuestRIP);
     if (GuestRIPLookup.Entry && !GuestRIPLookup.Entry->Filename.empty()) {
       auto filename = std::filesystem::path {GuestRIPLookup.Entry->Filename}.filename().string();

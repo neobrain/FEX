@@ -40,8 +40,7 @@ const std::array<std::string_view, FEXCore::Telemetry::TelemetryType::TYPE_LAST>
 static bool Enabled {true};
 void Initialize() {
   FEX_CONFIG_OPT(DisableTelemetry, DISABLETELEMETRY);
-//  if (DisableTelemetry) {
-  if (false) {
+  if (DisableTelemetry) {
     Enabled = false;
     return;
   }
