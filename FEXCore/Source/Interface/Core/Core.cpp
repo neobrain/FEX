@@ -765,7 +765,7 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
 
   if (true) {
     auto GuestRIPLookup = SyscallHandler->LookupAOTIRCacheEntry(Thread, GuestRIP);
-    if (GuestRIPLookup.Entry && !GuestRIPLookup.Entry->Filename.empty()) {
+    if (GuestRIPLookup.Entry && !GuestRIPLookup.Entry->Filename.empty() && false) {
       auto filename = std::filesystem::path {GuestRIPLookup.Entry->Filename}.filename().string();
       fextl::fmt::print(stderr, "LOOKING UP: {} <- {:#x} (ELF off {:#x})\n", filename, GuestRIP, GuestRIP - GuestRIPLookup.VAFileStart);
 
@@ -928,7 +928,7 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
   const bool EnableNewCodeCache = true;
   if (EnableNewCodeCache && DebugData) {
     auto GuestRIPLookup = SyscallHandler->LookupAOTIRCacheEntry(Thread, GuestRIP);
-    if (!GuestRIPLookup.Entry->Filename.empty()) {
+    if (!GuestRIPLookup.Entry->Filename.empty() && false) {
       auto filename = std::filesystem::path {GuestRIPLookup.Entry->Filename}.filename().string();
       fextl::fmt::print(stderr, "APPENDING TO: {} <- {:#x} ({}) (host ptr {})\n", filename, GuestRIP, DebugData->HostCodeSize, fmt::ptr(CodePtr));
       mkdir("/tmp/fexcache", 0700);
