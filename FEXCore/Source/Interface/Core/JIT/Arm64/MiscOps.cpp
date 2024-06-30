@@ -166,6 +166,9 @@ DEF_OP(PopRoundingMode) {
 DEF_OP(Print) {
   auto Op = IROp->C<IR::IROp_Print>();
 
+  // fextl::fmt::print(stderr, "    CURSOR before sub sp sp {:#x} / {:#x}\n", GetCursorAddress<uint8_t*>() - CodeData.BlockEntry,
+  //                   GetCursorAddress<uint8_t*>() - CodeData.BlockEntry + 0x7fffe30099c0);
+
   PushDynamicRegsAndLR(TMP1);
   SpillStaticRegs(TMP1);
 
@@ -185,6 +188,8 @@ DEF_OP(Print) {
       GenerateIndirectRuntimeCall<void, uint64_t, uint64_t>(ARMEmitter::Reg::r3);
     }
   } else {
+    // fextl::fmt::print(stderr, "    CURSOR after print is {:#x} / {:#x}\n", GetCursorAddress<uint8_t*>() - CodeData.BlockEntry,
+    //                   GetCursorAddress<uint8_t*>() - CodeData.BlockEntry + 0x7fffe30099c0);
     blr(ARMEmitter::Reg::r3);
   }
 

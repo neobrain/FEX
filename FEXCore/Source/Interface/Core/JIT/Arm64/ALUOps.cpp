@@ -58,6 +58,7 @@ DEF_OP(EntrypointOffset) {
     Mask = 0xFFFF'FFFFULL;
   }
 
+  // TODO: Does this need NOP padding?
   //  LoadConstant(ARMEmitter::Size::i64Bit, Dst, Constant & Mask);
   InsertGuestRIPMove(GetReg(Node), Constant & Mask);
 }

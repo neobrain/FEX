@@ -707,6 +707,8 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, const FEXCore
 
   CodeData.BlockEntry = GetCursorAddress<uint8_t*>();
 
+  fextl::fmt::print(stderr, "    DIFFERENCE: begin {} / entry {} => {:#x}\n", fmt::ptr(CodeData.BlockBegin), fmt::ptr(CodeData.BlockEntry),
+                    CodeData.BlockEntry - CodeData.BlockBegin);
   // Get the address of the JITCodeHeader and store in to the core state.
   // Two instruction cost, each 1 cycle.
   adr(TMP1, &JITCodeHeaderLabel);
@@ -878,6 +880,9 @@ void* Arm64JITCore::RelocateJITObjectCode(uint64_t Entry, std::span<const char> 
   auto RelocatedCode = GetCursorAddress<uint8_t*>();
   auto RelocatedCodeBeginOffset = GetCursorOffset();
   auto RelocatedCodeEndOffset = GetCursorOffset() + HostCode.size_bytes();
+
+  // fextl::fmt::print(stderr, "Beginning relocation of guest code {} to host address {}\n", fmt::ptr(reinterpret_cast<void*>(Entry)),
+  //                   fmt::ptr(RelocatedCode));
 
   memcpy(RelocatedCode, HostCode.data(), HostCode.size_bytes());
 

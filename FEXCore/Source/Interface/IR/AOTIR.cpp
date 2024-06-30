@@ -370,15 +370,19 @@ bool AOTIRCaptureCache::PostCompileCode(FEXCore::Core::InternalThreadState* Thre
   return false;
 }
 
-AOTIRCacheEntry* AOTIRCaptureCache::LoadAOTIRCacheEntry(const fextl::string& filename) {
+AOTIRCacheEntry* AOTIRCaptureCache::LoadAOTIRCacheEntry(const fextl::string& filename, fextl::vector<uint8_t> FileId) {
   fextl::string base_filename = FHU::Filesystem::GetFilename(filename);
 
   if (!base_filename.empty()) {
     auto filename_hash = XXH3_64bits(filename.c_str(), filename.size());
 
-    auto fileid = fextl::fmt::format("{}-{}-{}{}{}", base_filename, filename_hash,
-                                     (CTX->Config.SMCChecks == FEXCore::Config::CONFIG_SMC_FULL) ? 'S' : 's',
-                                     CTX->Config.TSOEnabled ? 'T' : 't', CTX->Config.ABILocalFlags ? 'L' : 'l');
+    if (FileId.empty()) {
+      // TODO: Generate fallback ID
+    }
+
+    auto fileid = fextl::fmt::format(
+      "{}-{}-{}{}{}{}{:02x}", base_filename, filename_hash, (CTX->Config.SMCChecks == FEXCore::Config::CONFIG_SMC_FULL) ? 'S' : 's',
+      CTX->Config.TSOEnabled ? 'T' : 't', CTX->Config.ABILocalFlags ? 'L' : 'l', FileId.empty() ? "" : "-", fmt::join(FileId, ""));
 
     std::unique_lock lk(AOTIRCacheLock);
 

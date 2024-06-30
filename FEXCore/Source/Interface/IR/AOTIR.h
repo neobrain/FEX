@@ -140,7 +140,7 @@ public:
   bool PostCompileCode(FEXCore::Core::InternalThreadState* Thread, void* CodePtr, uint64_t GuestRIP, uint64_t StartAddr, uint64_t Length,
                        fextl::unique_ptr<FEXCore::IR::IRStorageBase> IR, FEXCore::Core::DebugData* DebugData, bool GeneratedIR);
 
-  AOTIRCacheEntry* LoadAOTIRCacheEntry(const fextl::string& filename);
+  AOTIRCacheEntry* LoadAOTIRCacheEntry(const fextl::string& filename, fextl::vector<uint8_t> FileId);
   void UnloadAOTIRCacheEntry(AOTIRCacheEntry* Entry);
 
   // Callbacks

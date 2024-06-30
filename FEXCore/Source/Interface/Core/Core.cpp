@@ -744,6 +744,8 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
   };
 }
 
+static const char* limiter = "_";
+
 ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalThreadState* Thread, uint64_t GuestRIP, uint64_t MaxInst) {
   // JIT Code object cache lookup
   // if (CodeObjectCacheService) {
@@ -765,9 +767,9 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
 
   if (true) {
     auto GuestRIPLookup = SyscallHandler->LookupAOTIRCacheEntry(Thread, GuestRIP);
-    if (GuestRIPLookup.Entry && !GuestRIPLookup.Entry->Filename.empty()) {
-      auto filename = std::filesystem::path {GuestRIPLookup.Entry->Filename}.filename().string();
-      fextl::fmt::print(stderr, "LOOKING UP: {} <- {:#x} (ELF off {:#x})\n", filename, GuestRIP, GuestRIP - GuestRIPLookup.VAFileStart);
+    if (GuestRIPLookup.Entry && !GuestRIPLookup.Entry->Filename.empty() && GuestRIPLookup.Entry->FileId < limiter) {
+      const auto& filename = GuestRIPLookup.Entry->FileId;
+      // fextl::fmt::print(stderr, "LOOKING UP: {} <- {:#x} (ELF off {:#x})\n", filename, GuestRIP, GuestRIP - GuestRIPLookup.VAFileStart);
 
       // std::invoke([&]() {
       // TODO: Enable WAL for better concurrency (also consider PRAGMA schema.synchronous = NONE)
@@ -809,12 +811,12 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
         auto Relocations = (const CPU::Relocation*)sqlite3_column_blob(stmt, 3);
         auto NumRelocations = sqlite3_column_bytes(stmt, 3) / sizeof(CPU::Relocation);
 
-        fextl::fmt::print(stderr, "Got row for offset {:#x}: {:#x} bytes guest {:#x} -> host {:#x} {}\n", GuestRIP - GuestRIPLookup.VAFileStart,
-                          HostSize, OrigGuestAddr, OrigHostAddr, fmt::ptr(sqlite3_column_blob(stmt, 0)));
+        // fextl::fmt::print(stderr, "Got row for offset {:#x}: relocating {:#x} bytes from guest {:#x} / host {:#x} to guest {:#x}\n",
+        //                   GuestRIP - GuestRIPLookup.VAFileStart, HostSize, OrigGuestAddr, OrigHostAddr, GuestRIP);
 
-        fextl::fmt::print(stderr, "  {:02x}\n", fmt::join(blob, blob + HostSize, ""));
-        fextl::fmt::print(stderr, "  {:02x}\n",
-                          fmt::join((const char*)Relocations, (const char*)Relocations + NumRelocations * sizeof(CPU::Relocation), ""));
+        // fextl::fmt::print(stderr, "  {:02x}\n", fmt::join(blob, blob + HostSize, ""));
+        // fextl::fmt::print(stderr, "  {:02x}\n",
+        //                   fmt::join((const char*)Relocations, (const char*)Relocations + NumRelocations * sizeof(CPU::Relocation), ""));
         if (true) {
           // // TODO: Don't leak memory
           // auto CompiledCode =
@@ -832,7 +834,7 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
 
           sqlite3_close(db);
 
-          fextl::fmt::print(stderr, "RETURNING and running {} (prev {:#x})\n", fmt::ptr(CompiledCode), OrigHostAddr);
+          // fextl::fmt::print(stderr, "RETURNING and running {} (prev {:#x})\n", fmt::ptr(CompiledCode), OrigHostAddr);
           return {
             .CompiledCode = CompiledCode,
             .IR = nullptr,        // No IR/RA data generated
@@ -845,6 +847,7 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
       } else if (ret != SQLITE_DONE) {
         ERROR_AND_DIE_FMT("FAILED TO RUN SELECT STATEMENT: {}{}\n", ret, sqlite3_errstr(ret));
       } else if (ret) {
+        // ERROR_AND_DIE_FMT("Cache query returned no results: {}\n", sqlite3_errstr(ret));
         fextl::fmt::print(stderr, "Cache query returned no results: {}\n", sqlite3_errstr(ret));
       }
       sqlite3_finalize(stmt);
@@ -928,9 +931,10 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
   const bool EnableNewCodeCache = true;
   if (EnableNewCodeCache && DebugData) {
     auto GuestRIPLookup = SyscallHandler->LookupAOTIRCacheEntry(Thread, GuestRIP);
-    if (!GuestRIPLookup.Entry->Filename.empty()) {
-      auto filename = std::filesystem::path {GuestRIPLookup.Entry->Filename}.filename().string();
-      fextl::fmt::print(stderr, "APPENDING TO: {} <- {:#x} ({}) (host ptr {})\n", filename, GuestRIP, DebugData->HostCodeSize, fmt::ptr(CodePtr));
+    if (!GuestRIPLookup.Entry->Filename.empty() && GuestRIPLookup.Entry->FileId < limiter) {
+      const auto& filename = GuestRIPLookup.Entry->FileId;
+      fextl::fmt::print(stderr, "APPENDING TO: {} <- {:#x} ({}) (host ptr {}, ELF off {:#x})\n", filename, GuestRIP,
+                        DebugData->HostCodeSize, fmt::ptr(CodePtr), GuestRIP - GuestRIPLookup.VAFileStart);
       mkdir("/tmp/fexcache", 0700);
 
       if (GuestRIP < GuestRIPLookup.VAFileStart) {
@@ -939,7 +943,7 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
 
       // TODO: It seems that CodePtr points to BlockEntry, but really we should cache all data starting from BlockBegin?
 
-      fextl::fmt::print(stderr, "  {:02x}\n", fmt::join((char*)CodePtr, (char*)CodePtr + DebugData->HostCodeSize, ""));
+      // fextl::fmt::print(stderr, "  {:02x}\n", fmt::join((char*)CodePtr, (char*)CodePtr + DebugData->HostCodeSize, ""));
 
       std::invoke([&]() {
         sqlite3* db;
@@ -971,10 +975,12 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
         }
         sqlite3_finalize(stmt);
 
+        // TODO: Also insert guest block hash for non-PIC guest code
         ret = sqlite3_prepare_v2(db,
                                  "INSERT OR " /*IGNORE*/ "REPLACE INTO blocks (guest_offset, orig_guest_addr, host_addr, code, guest_code, "
                                  "ir, relocations) "
                                  "VALUES "
+                                 // "INSERT OR IGNORE INTO blocks (guest_offset, host_addr, code, guest_code, ir, relocations) VALUES "
                                  "(?, ?, ?, ?, ?, ?, ?)",
                                  -1, &stmt, nullptr);
         if (ret) {
@@ -1013,6 +1019,13 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
           ERROR_AND_DIE_FMT("FAILED TO BIND BLOB\n");
         }
         static_assert(sizeof(DebugData->Relocations[0]) == 24);
+        // if (DebugData->Relocations && !DebugData->Relocations->empty()) {
+        //   for (auto& reloc : *DebugData->Relocations) {
+        //     fextl::fmt::print(stderr, "reloc: {}\n", (int)reloc.Header.Type);
+        //   }
+        // } else {
+        //   fextl::fmt::print(stderr, "No relocations\n");
+        // }
 
         ret = sqlite3_step(stmt);
         if (ret == SQLITE_DONE) {
@@ -1265,9 +1278,8 @@ void ContextImpl::RemoveCustomIREntrypoint(uintptr_t Entrypoint) {
   HasCustomIRHandlers = !CustomIRHandlers.empty();
 }
 
-IR::AOTIRCacheEntry* ContextImpl::LoadAOTIRCacheEntry(const fextl::string& filename) {
-  auto rv = IRCaptureCache.LoadAOTIRCacheEntry(filename);
-  return rv;
+IR::AOTIRCacheEntry* ContextImpl::LoadAOTIRCacheEntry(const fextl::string& filename, fextl::vector<uint8_t> FileId) {
+  return IRCaptureCache.LoadAOTIRCacheEntry(filename, std::move(FileId));
 }
 
 void ContextImpl::UnloadAOTIRCacheEntry(IR::AOTIRCacheEntry* Entry) {

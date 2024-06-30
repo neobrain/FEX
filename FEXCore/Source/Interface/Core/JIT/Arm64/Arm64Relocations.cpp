@@ -60,6 +60,7 @@ auto Arm64JITCore::InsertNamedSymbolLiteral(FEXCore::CPU::RelocNamedSymbolLitera
 }
 
 auto Arm64JITCore::InsertGuestRIPLiteral(uint64_t GuestRIP) -> NamedSymbolLiteralPair {
+  fextl::fmt::print(stderr, "  InsertGuestRIPLiteral: GuestRIP {:#x}, Entry {:#x}\n", GuestRIP, Entry);
   NamedSymbolLiteralPair Lit {
     .Lit = GuestRIP,
     .MoveABI =
@@ -101,6 +102,7 @@ void Arm64JITCore::PlaceNamedSymbolLiteral(NamedSymbolLiteralPair& Lit) {
 
   Bind(&Lit.Loc);
   dc64(Lit.Lit);
+  fextl::fmt::print(stderr, "    CURSOR IS NOW AT {:#x}\n", GetCursorAddress<uint8_t*>() - CodeData.BlockEntry);
   Relocations.emplace_back(Lit.MoveABI);
 }
 
@@ -125,7 +127,7 @@ void Arm64JITCore::InsertGuestRIPMove(ARMEmitter::Register Reg, uint64_t Constan
 bool Arm64JITCore::ApplyRelocations(uint64_t GuestEntry, uint64_t CodeEntry, uint64_t CursorEntry, std::span<const Relocation> EntryRelocations) {
   for (size_t j = 0; j < EntryRelocations.size(); ++j) {
     const FEXCore::CPU::Relocation& Reloc = EntryRelocations[j];
-    fextl::fmt::print(stderr, "RELOCATION {}: {}\n", j, ToUnderlying(Reloc.Header.Type));
+    // fextl::fmt::print(stderr, "RELOCATION {}: {}\n", j, ToUnderlying(Reloc.Header.Type));
     switch (Reloc.Header.Type) {
     case FEXCore::CPU::RelocationTypes::RELOC_NAMED_SYMBOL_LITERAL: {
       uint64_t Pointer = GetNamedSymbolLiteral(Reloc.NamedSymbolLiteral.Symbol);
@@ -140,6 +142,7 @@ bool Arm64JITCore::ApplyRelocations(uint64_t GuestEntry, uint64_t CodeEntry, uin
     case FEXCore::CPU::RelocationTypes::RELOC_NAMED_THUNK_MOVE: {
       uint64_t Pointer = reinterpret_cast<uint64_t>(EmitterCTX->ThunkHandler->LookupThunk(Reloc.NamedThunkMove.Symbol));
       if (Pointer == ~0ULL) {
+        ERROR_AND_DIE_FMT("TODO: Implement RELOC_NAMED_THUNK_MOVE case");
         return false;
       }
 
@@ -149,8 +152,8 @@ bool Arm64JITCore::ApplyRelocations(uint64_t GuestEntry, uint64_t CodeEntry, uin
       break;
     }
     case FEXCore::CPU::RelocationTypes::RELOC_GUEST_RIP_MOVE: {
-      fextl::fmt::print(stderr, "  at {:#x}: move RIP {:#x} (at host {:#x})\n", Reloc.GuestRIPMove.Offset, Reloc.GuestRIPMove.GuestRIP,
-                        CursorEntry + Reloc.GuestRIPMove.Offset);
+      // fextl::fmt::print(stderr, "  at {:#x}: RIP_MOVE {:#x}-{:#x} (at host {:#x})\n", Reloc.GuestRIPMove.Offset,
+      //                   Reloc.GuestRIPMove.GuestRIP - GuestEntry, GuestEntry, CursorEntry + Reloc.GuestRIPMove.Offset);
 
       // TODO: In particular, should assert the RIP is still in the same library!
       uint64_t Pointer = Reloc.GuestRIPMove.GuestRIP + GuestEntry;
@@ -164,8 +167,8 @@ bool Arm64JITCore::ApplyRelocations(uint64_t GuestEntry, uint64_t CodeEntry, uin
     case FEXCore::CPU::RelocationTypes::RELOC_GUEST_RIP_LITERAL: {
       // TODO: For this to function, I think the page alignment of arm code within the original host page and the new host page must be the same?
 
-      fextl::fmt::print(stderr, "  GUEST_RIP_LITERAL patching host addr {:#x} / {:#x}: RIP {:#x}\n", Reloc.GuestRIPMove.Offset,
-                        CodeEntry + Reloc.GuestRIPMove.Offset, Reloc.GuestRIPMove.GuestRIP);
+      // fextl::fmt::print(stderr, "  GUEST_RIP_LITERAL patching host addr {:#x} / {:#x}: RIP delta {:#x} -> {:#x}\n", Reloc.GuestRIPMove.Offset,
+      //                   CodeEntry + Reloc.GuestRIPMove.Offset, Reloc.GuestRIPMove.GuestRIP, GuestEntry + Reloc.GuestRIPMove.GuestRIP);
       SetCursorOffset(CursorEntry + Reloc.GuestRIPMove.Offset);
       dc64(GuestEntry + Reloc.GuestRIPMove.GuestRIP);
       break;

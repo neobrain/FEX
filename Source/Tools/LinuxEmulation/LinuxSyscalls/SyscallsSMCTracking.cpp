@@ -9,11 +9,12 @@ $end_info$
 
 #include "Common/FDUtils.h"
 
-#include <filesystem>
 #include <sys/shm.h>
 #include <sys/mman.h>
 
 #include "LinuxSyscalls/Syscalls.h"
+
+#include "Linux/Utils/ELFParser.h"
 
 #include <FEXCore/Debug/InternalThreadState.h>
 #include <FEXCore/Utils/LogManager.h>
@@ -211,9 +212,18 @@ void SyscallHandler::TrackMmap(FEXCore::Core::InternalThreadState* Thread, uintp
         Resource = &Iter->second;
 
         if (Inserted) {
-          Resource->AOTIRCacheEntry = CTX->LoadAOTIRCacheEntry(fextl::string(Tmp, PathLength));
+          fextl::string Filename(Tmp, PathLength);
+          fextl::fmt::print(stderr, "Reading build id from {}\n", Filename);
+          LogMan::Msg::EFmt("Opening AOTIR resource {}", Filename);
+          ELFParser Elf;
+          // TODO: Suppress or fix logging errors for non-ELF files
+          Elf.ReadElf(Filename);
+
+          Resource->AOTIRCacheEntry = CTX->LoadAOTIRCacheEntry(std::move(Filename), std::move(Elf.BuildID));
           Resource->Iterator = Iter;
         }
+      } else {
+        LogMan::Msg::EFmt("Failed to open AOTIR resource due to unknown name");
       }
     } else if (Flags & MAP_SHARED) {
       MRID mrid {SpecialDev::Anon, AnonSharedId++};

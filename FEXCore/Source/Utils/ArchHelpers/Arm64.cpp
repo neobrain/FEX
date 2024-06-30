@@ -2081,6 +2081,11 @@ HandleUnalignedAccess(FEXCore::Core::InternalThreadState* Thread, UnalignedHandl
     }
   }
 
+  if (InlineTail->SpinLockFutex != 0 && InlineTail->SpinLockFutex != 1) {
+    fprintf(stderr, "FUTEX PRECONDITION VIOLATED\n");
+    std::terminate();
+  }
+
   // Lock code mutex during any SIGBUS handling that potentially changes code.
   // Due to code buffer sharing between threads, code must be carefully backpatched from last to first.
   // Multiple threads can be attempting to handle the SIGBUS or even be executing the code being backpatched.

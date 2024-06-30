@@ -22,6 +22,8 @@ struct ELFParser {
   ::ELFLoader::ELFContainer::ELFType type {::ELFLoader::ELFContainer::TYPE_NONE};
 
   fextl::string InterpreterElf;
+  fextl::vector<uint8_t> BuildID;
+
   int fd {-1};
 
   bool ReadElf(int NewFD) {
@@ -188,6 +190,38 @@ struct ELFParser {
           LogMan::Msg::EFmt("Failed to read interpreter from '{}'", fd);
           return false;
         }
+      } else if (phdr.p_type == PT_NOTE) {
+        fprintf(stderr, "FOUND PT_NOTE SECTION: %#x %#x\n", (int)phdr.p_filesz, (int)phdr.p_offset);
+        Elf64_Nhdr nhdr;
+        auto NoteOffset = phdr.p_offset;
+        if (type == ::ELFLoader::ELFContainer::TYPE_X86_32) {
+          Elf32_Nhdr nhdr32;
+          if (pread(fd, &nhdr32, std::min<uint64_t>(phdr.p_filesz, sizeof(nhdr32)), phdr.p_offset) < sizeof(nhdr32)) {
+            continue;
+          }
+          nhdr.n_namesz = nhdr32.n_namesz;
+          nhdr.n_descsz = nhdr32.n_descsz;
+          nhdr.n_type = nhdr32.n_type;
+          NoteOffset += sizeof(nhdr32);
+        } else {
+          if (pread(fd, &nhdr, std::min<uint64_t>(phdr.p_filesz, sizeof(nhdr)), phdr.p_offset) < sizeof(nhdr)) {
+            continue;
+          }
+          NoteOffset += sizeof(nhdr);
+        }
+
+        fprintf(stderr, "PT_NOTE: TYPE: %#x\n", nhdr.n_type);
+
+        if (nhdr.n_type != NT_GNU_BUILD_ID) {
+          continue;
+        }
+
+        BuildID.resize(nhdr.n_descsz);
+        if (pread(fd, BuildID.data(), nhdr.n_descsz, NoteOffset + nhdr.n_namesz) != BuildID.size()) {
+          LogMan::Msg::EFmt("Failed to read ELF note from '{}'", fd);
+          return false;
+        }
+        fprintf(stderr, "PT_NOTE: FOUND BUILD ID\n");
       }
     }
 
