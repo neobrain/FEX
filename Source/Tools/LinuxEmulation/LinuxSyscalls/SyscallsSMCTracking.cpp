@@ -213,8 +213,6 @@ void SyscallHandler::TrackMmap(FEXCore::Core::InternalThreadState* Thread, uintp
 
         if (Inserted) {
           fextl::string Filename(Tmp, PathLength);
-          fextl::fmt::print(stderr, "Reading build id from {}\n", Filename);
-          LogMan::Msg::EFmt("Opening AOTIR resource {}", Filename);
           ELFParser Elf;
           // TODO: Suppress or fix logging errors for non-ELF files
           Elf.ReadElf(Filename);
@@ -222,8 +220,6 @@ void SyscallHandler::TrackMmap(FEXCore::Core::InternalThreadState* Thread, uintp
           Resource->AOTIRCacheEntry = CTX->LoadAOTIRCacheEntry(std::move(Filename), std::move(Elf.BuildID));
           Resource->Iterator = Iter;
         }
-      } else {
-        LogMan::Msg::EFmt("Failed to open AOTIR resource due to unknown name");
       }
     } else if (Flags & MAP_SHARED) {
       MRID mrid {SpecialDev::Anon, AnonSharedId++};

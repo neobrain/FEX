@@ -191,7 +191,6 @@ struct ELFParser {
           return false;
         }
       } else if (phdr.p_type == PT_NOTE) {
-        fprintf(stderr, "FOUND PT_NOTE SECTION: %#x %#x\n", (int)phdr.p_filesz, (int)phdr.p_offset);
         Elf64_Nhdr nhdr;
         auto NoteOffset = phdr.p_offset;
         if (type == ::ELFLoader::ELFContainer::TYPE_X86_32) {
@@ -210,8 +209,6 @@ struct ELFParser {
           NoteOffset += sizeof(nhdr);
         }
 
-        fprintf(stderr, "PT_NOTE: TYPE: %#x\n", nhdr.n_type);
-
         if (nhdr.n_type != NT_GNU_BUILD_ID) {
           continue;
         }
@@ -221,7 +218,6 @@ struct ELFParser {
           LogMan::Msg::EFmt("Failed to read ELF note from '{}'", fd);
           return false;
         }
-        fprintf(stderr, "PT_NOTE: FOUND BUILD ID\n");
       }
     }
 

@@ -975,7 +975,6 @@ void OpDispatchBuilder::JUMPOp(OpcodeArgs) {
     auto NewRIP = _Add(OpSize::i64Bit, _Constant(TargetOffset), RIPTargetConst);
 
     // Store the new RIP
-    // fextl::fmt::print("  HANDLING JMP AT {:#x} TO +{:#x}\n", Op->PC, TargetOffset);
     ExitFunction(NewRIP);
   }
 }
@@ -4889,8 +4888,6 @@ void OpDispatchBuilder::BreakOp(OpcodeArgs, FEXCore::IR::BreakDefinition BreakDe
   BlockSetRIP = true;
 
   if (Multiblock) {
-    ERROR_AND_DIE_FMT("MULTIBLOCK IS UNTESTED WITH CODE CACHING");
-
     auto NextBlock = CreateNewCodeBlockAfter(GetCurrentBlock());
     SetCurrentCodeBlock(NextBlock);
     StartNewBlock();

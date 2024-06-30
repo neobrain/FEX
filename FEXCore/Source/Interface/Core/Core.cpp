@@ -599,8 +599,6 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
       // Reset any block-specific state
       Thread->OpDispatcher->StartNewBlock();
 
-      // Thread->OpDispatcher->_Print(Thread->OpDispatcher->_Constant(0xdeadb00f));
-
       uint64_t InstsInBlock = Block.NumInstructions;
 
       if (InstsInBlock == 0) {
@@ -744,7 +742,7 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
   };
 }
 
-static const char* limiter = "_";
+static const char* limiter = "zzzzzzzzz";
 
 ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalThreadState* Thread, uint64_t GuestRIP, uint64_t MaxInst) {
   // JIT Code object cache lookup
@@ -777,16 +775,44 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
       // TODO: Add table for cache version (FEX build etc)
       // TODO: Add table for statistics (cache hits / misses, etc)
 
+      // static fextl::unordered_map<fextl::string, sqlite3*> dbs;
+      // auto dbit = dbs.find(filename);
+      // sqlite3* db;
+      // int ret;
+      // if (dbit == dbs.end()) {
+      //   ret = sqlite3_open_v2(("/tmp/fexcache/" + filename + ".db").c_str(), &db, SQLITE_OPEN_READONLY, nullptr);
+      //   if (ret) {
+      //     fextl::fmt::print(stderr, "FAILED TO OPEN SQLITE DATABASE, skipping load\n");
+      //   }
+      //   bool inserted;
+      //   std::tie(dbit, inserted) = dbs.emplace(filename, db);
+      // }
+      // if (dbit == dbs.end()) {
+      //   goto skip_load_cache;
+      // }
+      // db = dbit->second;
+      static fextl::unordered_map<fextl::string, sqlite3*> dbs;
+      auto dbit = dbs.find(filename);
+      // auto dbit = dbs.end();
       sqlite3* db;
-      auto ret = sqlite3_open_v2(("/tmp/fexcache/" + filename + ".db").c_str(), &db, SQLITE_OPEN_READONLY, nullptr);
-      if (ret) {
-        fextl::fmt::print(stderr, "FAILED TO OPEN SQLITE DATABASE, skipping load\n");
+      int ret;
+      if (dbit == dbs.end()) {
+        ret = sqlite3_open_v2(("/tmp/fexcache/" + filename + ".db").c_str(), &db, /*SQLITE_OPEN_READONLY*/ SQLITE_OPEN_READWRITE, nullptr);
+        if (ret) {
+          fextl::fmt::print(stderr, "FAILED TO OPEN SQLITE DATABASE, skipping load\n");
+        } else {
+          bool inserted;
+          std::tie(dbit, inserted) = dbs.emplace(filename, db);
+        }
+      }
+      if (dbit == dbs.end()) {
         goto skip_load_cache;
       }
+      db = dbit->second;
 
       sqlite3_busy_handler(db, [](void*, int attempt) {
         // TODO: Consider falling back to re-compiling the current block instead of waiting
-        fextl::fmt::print(stderr, "DATABASE IS BUSY, RETRYING... (attempt {})\n", attempt);
+//        fextl::fmt::print(stderr, "DATABASE IS BUSY, RETRYING... (attempt {})\n", attempt);
         std::this_thread::yield();
         return 1;
       }, nullptr);
@@ -794,6 +820,7 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
       sqlite3_stmt* stmt;
       ret = sqlite3_prepare_v2(db, "SELECT code, orig_guest_addr, host_addr, relocations FROM blocks WHERE guest_offset = ?", -1, &stmt, nullptr);
       if (ret) {
+        fextl::fmt::print(stderr, "FAILED TO PREPARE CREATE SELECT STATEMENT: {}\n", sqlite3_errstr(ret));
         ERROR_AND_DIE_FMT("FAILED TO PREPARE CREATE SELECT STATEMENT: {}\n", sqlite3_errstr(ret));
       }
       ret = sqlite3_bind_int64(stmt, 1, GuestRIP - GuestRIPLookup.VAFileStart);
@@ -832,7 +859,7 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
                                                                          std::span {Relocations, Relocations + NumRelocations});
           sqlite3_finalize(stmt);
 
-          sqlite3_close(db);
+          // sqlite3_close(db);
 
           // fextl::fmt::print(stderr, "RETURNING and running {} (prev {:#x})\n", fmt::ptr(CompiledCode), OrigHostAddr);
           return {
@@ -848,11 +875,11 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
         ERROR_AND_DIE_FMT("FAILED TO RUN SELECT STATEMENT: {}{}\n", ret, sqlite3_errstr(ret));
       } else if (ret) {
         // ERROR_AND_DIE_FMT("Cache query returned no results: {}\n", sqlite3_errstr(ret));
-        fextl::fmt::print(stderr, "Cache query returned no results: {}\n", sqlite3_errstr(ret));
+ //       fextl::fmt::print(stderr, "Cache query returned no results: {}\n", sqlite3_errstr(ret));
       }
       sqlite3_finalize(stmt);
 
-      sqlite3_close(db);
+      // sqlite3_close(db);
 skip_load_cache:;
     }
   }
@@ -933,8 +960,8 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
     auto GuestRIPLookup = SyscallHandler->LookupAOTIRCacheEntry(Thread, GuestRIP);
     if (GuestRIPLookup.Entry && !GuestRIPLookup.Entry->Filename.empty() && GuestRIPLookup.Entry->FileId < limiter) {
       const auto& filename = GuestRIPLookup.Entry->FileId;
-      fextl::fmt::print(stderr, "APPENDING TO: {} <- {:#x} ({}) (host ptr {}, ELF off {:#x})\n", filename, GuestRIP,
-                        DebugData->HostCodeSize, fmt::ptr(CodePtr), GuestRIP - GuestRIPLookup.VAFileStart);
+//      fextl::fmt::print(stderr, "APPENDING TO: {} <- {:#x} ({}) (host ptr {}, ELF off {:#x})\n", filename, GuestRIP,
+//                        DebugData->HostCodeSize, fmt::ptr(CodePtr), GuestRIP - GuestRIPLookup.VAFileStart);
       mkdir("/tmp/fexcache", 0700);
 
       if (GuestRIP < GuestRIPLookup.VAFileStart) {
@@ -953,7 +980,7 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
         }
 
         sqlite3_busy_handler(db, [](void*, int attempt) {
-          fextl::fmt::print(stderr, "DATABASE IS BUSY, RETRYING... (attempt {})\n", attempt);
+  //        fextl::fmt::print(stderr, "DATABASE IS BUSY, RETRYING... (attempt {})\n", attempt);
           std::this_thread::yield();
           return 1;
         }, nullptr);
@@ -1029,7 +1056,7 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
 
         ret = sqlite3_step(stmt);
         if (ret == SQLITE_DONE) {
-          fextl::fmt::print(stderr, "Row inserted\n");
+    //      fextl::fmt::print(stderr, "Row inserted\n");
         } else if (ret) {
           ERROR_AND_DIE_FMT("FAILED TO RUN STATEMENT: {} ({})\n", sqlite3_errstr(ret), ret);
         }

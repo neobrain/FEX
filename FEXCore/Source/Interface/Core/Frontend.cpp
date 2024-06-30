@@ -704,7 +704,6 @@ bool Decoder::DecodeInstruction(uint64_t PC) {
 
   DecodeInst = &DecodedBuffer[DecodedSize];
   memset(DecodeInst, 0, sizeof(DecodedInst));
-  // fextl::fmt::print(stderr, "DECODING INSTR AT {:#x}\n", PC);
   DecodeInst->PC = PC;
 
   for (;;) {

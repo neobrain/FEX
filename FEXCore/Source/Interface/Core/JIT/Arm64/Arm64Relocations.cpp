@@ -60,7 +60,6 @@ auto Arm64JITCore::InsertNamedSymbolLiteral(FEXCore::CPU::RelocNamedSymbolLitera
 }
 
 auto Arm64JITCore::InsertGuestRIPLiteral(uint64_t GuestRIP) -> NamedSymbolLiteralPair {
-  fextl::fmt::print(stderr, "  InsertGuestRIPLiteral: GuestRIP {:#x}, Entry {:#x}\n", GuestRIP, Entry);
   NamedSymbolLiteralPair Lit {
     .Lit = GuestRIP,
     .MoveABI =
@@ -92,8 +91,8 @@ void Arm64JITCore::PlaceNamedSymbolLiteral(NamedSymbolLiteralPair& Lit) {
   case RelocationTypes::RELOC_GUEST_RIP_LITERAL: {
     // TODO: Switch back to BlockBegin
     Lit.MoveABI.GuestRIPMove.Offset = CurrentCursor - CodeData.BlockEntry;
-    fextl::fmt::print(stderr, "  EMITTING RELOCATION AT OFFSET {:#x} for guest rip {:#x} with literal {:#x}\n",
-                      CurrentCursor - CodeData.BlockEntry, Lit.MoveABI.GuestRIPMove.GuestRIP + Entry, Lit.Lit);
+    // fextl::fmt::print(stderr, "  EMITTING RELOCATION AT OFFSET {:#x} for guest rip {:#x} with literal {:#x}\n",
+    //                   CurrentCursor - CodeData.BlockEntry, Lit.MoveABI.GuestRIPMove.GuestRIP + Entry, Lit.Lit);
     break;
   }
 
@@ -102,7 +101,6 @@ void Arm64JITCore::PlaceNamedSymbolLiteral(NamedSymbolLiteralPair& Lit) {
 
   Bind(&Lit.Loc);
   dc64(Lit.Lit);
-  fextl::fmt::print(stderr, "    CURSOR IS NOW AT {:#x}\n", GetCursorAddress<uint8_t*>() - CodeData.BlockEntry);
   Relocations.emplace_back(Lit.MoveABI);
 }
 
@@ -142,7 +140,6 @@ bool Arm64JITCore::ApplyRelocations(uint64_t GuestEntry, uint64_t CodeEntry, uin
     case FEXCore::CPU::RelocationTypes::RELOC_NAMED_THUNK_MOVE: {
       uint64_t Pointer = reinterpret_cast<uint64_t>(EmitterCTX->ThunkHandler->LookupThunk(Reloc.NamedThunkMove.Symbol));
       if (Pointer == ~0ULL) {
-        ERROR_AND_DIE_FMT("TODO: Implement RELOC_NAMED_THUNK_MOVE case");
         return false;
       }
 

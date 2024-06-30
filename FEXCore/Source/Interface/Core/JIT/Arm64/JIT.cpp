@@ -66,8 +66,7 @@ static int64_t LREM(uint64_t SrcHigh, uint64_t SrcLow, int64_t Divisor) {
 }
 
 static void PrintValue(uint64_t Value) {
-  fextl::fmt::print(stderr, "DEBUG VALUE: {:#x}\n", Value);
-  //  LogMan::Msg::DFmt("Value: 0x{:x}", Value);
+  LogMan::Msg::DFmt("Value: 0x{:x}", Value);
 }
 
 static void PrintVectorValue(uint64_t Value, uint64_t ValueUpper) {
@@ -707,8 +706,6 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, const FEXCore
 
   CodeData.BlockEntry = GetCursorAddress<uint8_t*>();
 
-  fextl::fmt::print(stderr, "    DIFFERENCE: begin {} / entry {} => {:#x}\n", fmt::ptr(CodeData.BlockBegin), fmt::ptr(CodeData.BlockEntry),
-                    CodeData.BlockEntry - CodeData.BlockBegin);
   // Get the address of the JITCodeHeader and store in to the core state.
   // Two instruction cost, each 1 cycle.
   adr(TMP1, &JITCodeHeaderLabel);
@@ -880,9 +877,6 @@ void* Arm64JITCore::RelocateJITObjectCode(uint64_t Entry, std::span<const char> 
   auto RelocatedCode = GetCursorAddress<uint8_t*>();
   auto RelocatedCodeBeginOffset = GetCursorOffset();
   auto RelocatedCodeEndOffset = GetCursorOffset() + HostCode.size_bytes();
-
-  // fextl::fmt::print(stderr, "Beginning relocation of guest code {} to host address {}\n", fmt::ptr(reinterpret_cast<void*>(Entry)),
-  //                   fmt::ptr(RelocatedCode));
 
   memcpy(RelocatedCode, HostCode.data(), HostCode.size_bytes());
 
