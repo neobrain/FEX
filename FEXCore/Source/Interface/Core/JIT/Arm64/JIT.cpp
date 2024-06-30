@@ -918,8 +918,7 @@ void* Arm64JITCore::RelocateJITObjectCode(uint64_t Entry, std::span<const char> 
     CursorIncrement(sizeof(JITCodeTail));
   }
 
-  CPU.EnsureIAndDCacheCoherency(reinterpret_cast<void*>(RelocatedCode - sizeof(JITCodeHeader)),
-                                HostCode.size_bytes() + sizeof(JITCodeHeader) + sizeof(JITCodeTail));
+  CPU.EnsureIAndDCacheCoherency(reinterpret_cast<void*>(RelocatedCode), HostCode.size_bytes());
 
   return RelocatedCode;
 }
