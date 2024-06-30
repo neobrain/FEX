@@ -114,11 +114,11 @@ void Arm64JITCore::InsertGuestRIPMove(ARMEmitter::Register Reg, uint64_t Constan
   MoveABI.GuestRIPMove.GuestRIP = Constant - Entry;
   MoveABI.GuestRIPMove.RegisterIndex = Reg.Idx();
 
-  fextl::fmt::print("  GENERATING GUEST_RIP_MOVE RELOC FROM {:#x}-{:#x} at OFFSET {:#x}\n", Constant, Entry, MoveABI.GuestRIPMove.Offset);
+  // fextl::fmt::print("  GENERATING GUEST_RIP_MOVE RELOC FROM {:#x}-{:#x} at OFFSET {:#x}\n", Constant, Entry, MoveABI.GuestRIPMove.Offset);
 
-  fextl::fmt::print("  Before load constant: {}\n", fmt::ptr(GetCursorAddress<uint8_t*>()));
+  // fextl::fmt::print("  Before load constant: {}\n", fmt::ptr(GetCursorAddress<uint8_t*>()));
   LoadConstant(ARMEmitter::Size::i64Bit, Reg, Constant, /*EmitterCTX->Config.CacheObjectCodeCompilation()*/ true);
-  fextl::fmt::print("  After load constant: {}\n", fmt::ptr(GetCursorAddress<uint8_t*>()));
+  // fextl::fmt::print("  After load constant: {}\n", fmt::ptr(GetCursorAddress<uint8_t*>()));
   Relocations.emplace_back(MoveABI);
 }
 
