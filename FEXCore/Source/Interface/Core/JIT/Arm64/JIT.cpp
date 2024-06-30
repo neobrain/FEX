@@ -890,7 +890,34 @@ void* Arm64JITCore::RelocateJITObjectCode(uint64_t Entry, std::span<const char> 
   // Restore cursor position
   SetCursorOffset(RelocatedCodeEndOffset);
 
-  dc32(Entry); // JITCodeTail
+
+  {
+    auto JITBlockTail = GetCursorAddress<JITCodeTail*>();
+
+    JITBlockTail->RIP = Entry;
+    JITBlockTail->SpinLockFutex = 0;
+
+    // TODO
+    // {
+    //   // Store the RIP entries.
+    //   JITBlockTail->NumberOfRIPEntries = DebugData->GuestOpcodes.size();
+    //   JITBlockTail->OffsetToRIPEntries = JITRIPEntriesLocation - JITBlockTailLocation;
+    //   uintptr_t CurrentRIPOffset = 0;
+    //   uint64_t CurrentPCOffset = 0;
+    //   for (size_t i = 0; i < DebugData->GuestOpcodes.size(); i++) {
+    //     const auto& GuestOpcode = DebugData->GuestOpcodes[i];
+    //     auto& RIPEntry = JITRIPEntries[i];
+    //     RIPEntry.HostPCOffset = GuestOpcode.HostEntryOffset - CurrentPCOffset;
+    //     RIPEntry.GuestRIPOffset = GuestOpcode.GuestEntryOffset - CurrentRIPOffset;
+    //     CurrentPCOffset = GuestOpcode.HostEntryOffset;
+    //     CurrentRIPOffset = GuestOpcode.GuestEntryOffset;
+    //   }
+    // }
+
+    JITBlockTail->Size = GetCursorAddress<uint8_t*>() - CodeData.BlockBegin;
+    CursorIncrement(sizeof(JITCodeTail));
+  }
+
   CPU.EnsureIAndDCacheCoherency(reinterpret_cast<void*>(RelocatedCode - sizeof(JITCodeHeader)),
                                 HostCode.size_bytes() + sizeof(JITCodeHeader) + sizeof(JITCodeTail));
 
