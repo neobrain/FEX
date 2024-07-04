@@ -77,6 +77,10 @@ $end_info$
 
 #include <sqlite3.h>
 
+void FlushCodeCache();
+
+static FEXCore::ForkableSharedMutex* g_CodeInvalidationMutex = nullptr;
+
 namespace FEXCore::Context {
 ContextImpl::ContextImpl(const FEXCore::HostFeatures& Features)
   : HostFeatures {Features}
@@ -108,11 +112,20 @@ ContextImpl::ContextImpl(const FEXCore::HostFeatures& Features)
   UpdateAtomicTSOEmulationConfig();
 }
 
+
+// struct TheDB : public fextl::unordered_map<fextl::string, std::unique_ptr<sqlite3, sqlite3_closer>> {};
+struct TheDB : public fextl::unordered_map<fextl::string, std::unique_ptr<sqlite3, decltype([](sqlite3* db) { sqlite3_close(db); })>> {};
+static TheDB dbs;
+
 ContextImpl::~ContextImpl() {
   {
     if (CodeObjectCacheService) {
       CodeObjectCacheService->Shutdown();
     }
+    if (g_CodeInvalidationMutex) {
+      auto lk = GuardSignalDeferringSectionWithFallback<std::unique_lock>(*g_CodeInvalidationMutex, nullptr);
+    }
+    dbs.clear();
   }
 }
 
@@ -479,6 +492,8 @@ void ContextImpl::UnlockAfterFork(FEXCore::Core::InternalThreadState* LiveThread
 
 void ContextImpl::LockBeforeFork(FEXCore::Core::InternalThreadState* Thread) {
   CodeInvalidationMutex.lock();
+  // NOTE: According to SQLite documentation, "Under Unix, you should not carry an open SQLite database across a fork() system call into the child process."
+  dbs.clear();
   Allocator::LockBeforeFork(Thread);
   if (Config.StrictInProcessSplitLocks) {
     FEXCore::Utils::SpinWaitLock::lock(&StrictSplitLockMutex);
@@ -742,30 +757,46 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
   };
 }
 
-static const char* limiter = "zzzzzzzzz";
+bool EnableCacheFor(uint64_t GuestRIP, const HLE::AOTIRCacheEntryLookupResult& Entry) {
+  return true;
+}
 
-static fextl::unordered_map<fextl::string, sqlite3*> dbs;
 static sqlite3* OpenCacheDB(const fextl::string& filename, bool create) {
   auto dbit = dbs.find(filename);
   if (dbit == dbs.end()) {
-    if (!create) {
-      // fextl::fmt::print(stderr, "FAILED TO OPEN SQLITE DATABASE {}, skipping load\n", filename);
-      return nullptr;
+    int flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX; // TODO: Is FULLMUTEX needed?
+    if (create) {
+      flags |= SQLITE_OPEN_CREATE;
     }
     sqlite3* db;
-    // auto ret = sqlite3_open_v2(("/tmp/fexcache/" + filename + ".db").c_str(), &db, /*SQLITE_OPEN_READONLY*/ SQLITE_OPEN_READWRITE, nullptr);
-    auto ret = sqlite3_open(("/tmp/fexcache/" + filename + ".db").c_str(), &db);
+    auto ret = sqlite3_open_v2(("/tmp/fexcache/" + filename + ".db").c_str(), &db, flags, nullptr);
     if (ret) {
-      // TODO: Actually should be fatal?
-      fextl::fmt::print(stderr, "FAILED TO OPEN SQLITE DATABASE, skipping load\n");
+      if (create) {
+        ERROR_AND_DIE_FMT("FAILED TO OPEN SQLITE DATABASE\n");
+      }
       return nullptr;
     }
-    // fextl::fmt::print(stderr, "Created SQLITE DATABASE {}\n", filename);
+    sqlite3_busy_handler(db, [](void*, int attempt) {
+      // TODO: Consider falling back to re-compiling the current block instead of waiting
+      std::this_thread::yield();
+      return 1;
+    }, nullptr);
+
+
+    ret = sqlite3_exec(db, "PRAGMA journal_mode=WAL;", nullptr, nullptr, nullptr);
+    if (ret) {
+      fextl::fmt::print(stderr, "{}: FAILED TO SET WAL MODE: {} ({})\n", ::getpid(), sqlite3_errstr(ret), ret);
+    }
+    // NOTE: This may cause the database to be corrupt on system crash, but should survive application crashes just fine
+    ret = sqlite3_exec(db, "PRAGMA synchronous=OFF;", nullptr, nullptr, nullptr);
+    if (ret) {
+      fextl::fmt::print(stderr, "{}: FAILED TO SET SYNCH MODE: {} ({})\n", ::getpid(), sqlite3_errstr(ret), ret);
+    }
 
     bool inserted;
-    std::tie(dbit, inserted) = dbs.emplace(filename, db);
+    std::tie(dbit, inserted) = dbs.emplace(filename, decltype(dbs)::mapped_type {db});
   }
-  return dbit->second;
+  return dbit->second.get();
 }
 
 ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalThreadState* Thread, uint64_t GuestRIP, uint64_t MaxInst) {
@@ -789,7 +820,7 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
 
   if (true) {
     auto GuestRIPLookup = SyscallHandler->LookupAOTIRCacheEntry(Thread, GuestRIP);
-    if (GuestRIPLookup.Entry && !GuestRIPLookup.Entry->Filename.empty() && GuestRIPLookup.Entry->FileId < limiter) {
+    if (GuestRIPLookup.Entry && !GuestRIPLookup.Entry->Filename.empty() && EnableCacheFor(GuestRIP, GuestRIPLookup)) {
       const auto& filename = GuestRIPLookup.Entry->FileId;
       // fextl::fmt::print(stderr, "LOOKING UP: {} <- {:#x} (ELF off {:#x})\n", filename, GuestRIP, GuestRIP - GuestRIPLookup.VAFileStart);
 
@@ -805,17 +836,9 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
         goto skip_load_cache;
       }
 
-      sqlite3_busy_handler(db, [](void*, int attempt) {
-        // TODO: Consider falling back to re-compiling the current block instead of waiting
-//        fextl::fmt::print(stderr, "DATABASE IS BUSY, RETRYING... (attempt {})\n", attempt);
-        std::this_thread::yield();
-        return 1;
-      }, nullptr);
-
       sqlite3_stmt* stmt;
       ret = sqlite3_prepare_v2(db, "SELECT code, orig_guest_addr, host_addr, relocations FROM blocks WHERE guest_offset = ?", -1, &stmt, nullptr);
       if (ret) {
-        fextl::fmt::print(stderr, "FAILED TO PREPARE CREATE SELECT STATEMENT: {}\n", sqlite3_errstr(ret));
         ERROR_AND_DIE_FMT("FAILED TO PREPARE CREATE SELECT STATEMENT: {}\n", sqlite3_errstr(ret));
       }
       ret = sqlite3_bind_int64(stmt, 1, GuestRIP - GuestRIPLookup.VAFileStart);
@@ -937,7 +960,10 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
   auto Thread = Frame->Thread;
 
   // Invalidate might take a unique lock on this, to guarantee that during invalidation no code gets compiled
-  auto lk = GuardSignalDeferringSection<std::shared_lock>(CodeInvalidationMutex, Thread);
+  auto lk = GuardSignalDeferringSection<std::unique_lock>(CodeInvalidationMutex, Thread);
+  if (!g_CodeInvalidationMutex) {
+    g_CodeInvalidationMutex = &CodeInvalidationMutex;
+  }
 
   // Is the code in the cache?
   // The backends only check L1 and L2, not L3
@@ -953,11 +979,11 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
   const bool EnableNewCodeCache = true;
   if (EnableNewCodeCache && DebugData) {
     auto GuestRIPLookup = SyscallHandler->LookupAOTIRCacheEntry(Thread, GuestRIP);
-    if (GuestRIPLookup.Entry && !GuestRIPLookup.Entry->Filename.empty() && GuestRIPLookup.Entry->FileId < limiter) {
+    if (GuestRIPLookup.Entry && !GuestRIPLookup.Entry->Filename.empty() && EnableCacheFor(GuestRIP, GuestRIPLookup)) {
       const auto& filename = GuestRIPLookup.Entry->FileId;
-//      fextl::fmt::print(stderr, "APPENDING TO: {} <- {:#x} ({}) (host ptr {}, ELF off {:#x})\n", filename, GuestRIP,
-//                        DebugData->HostCodeSize, fmt::ptr(CodePtr), GuestRIP - GuestRIPLookup.VAFileStart);
-      mkdir("/tmp/fexcache", 0700);
+      // fextl::fmt::print(stderr, "APPENDING TO: {} <- {:#x} ({}) (host ptr {}, ELF off {:#x})\n", filename, GuestRIP,
+      //                   DebugData->HostCodeSize, fmt::ptr(CodePtr), GuestRIP - GuestRIPLookup.VAFileStart);
+      // mkdir("/tmp/fexcache", 0700);
 
       if (GuestRIP < GuestRIPLookup.VAFileStart) {
         ERROR_AND_DIE_FMT("Invalid guest offset");
@@ -977,13 +1003,6 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
         if (!db) {
           ERROR_AND_DIE_FMT("FAILED TO OPEN SQLITE DATABASE\n");
         }
-
-
-        sqlite3_busy_handler(db, [](void*, int attempt) {
-  //        fextl::fmt::print(stderr, "DATABASE IS BUSY, RETRYING... (attempt {})\n", attempt);
-          std::this_thread::yield();
-          return 1;
-        }, nullptr);
 
         sqlite3_stmt* stmt;
         auto ret = sqlite3_prepare_v2(db,
@@ -1048,41 +1067,21 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
           ERROR_AND_DIE_FMT("FAILED TO BIND BLOB\n");
         }
         static_assert(sizeof(DebugData->Relocations[0]) == 24);
-        // if (DebugData->Relocations && !DebugData->Relocations->empty()) {
-        //   for (auto& reloc : *DebugData->Relocations) {
-        //     fextl::fmt::print(stderr, "reloc: {}\n", (int)reloc.Header.Type);
-        //   }
-        // } else {
-        //   fextl::fmt::print(stderr, "No relocations\n");
-        // }
 
+retry:
         ret = sqlite3_step(stmt);
         if (ret == SQLITE_DONE) {
           //      fextl::fmt::print(stderr, "Row inserted\n");
         } else if (ret) {
-          ERROR_AND_DIE_FMT("FAILED TO RUN STATEMENT: {} ({})\n", sqlite3_errstr(ret), ret);
+          ret = sqlite3_extended_errcode(db);
+          ERROR_AND_DIE_FMT("FAILED TO RUN INSERT STATEMENT: {} ({}) {} (readonly: {})\n", sqlite3_errstr(ret), ret, ::getpid(),
+                            sqlite3_db_readonly(db, nullptr));
         }
         sqlite3_finalize(stmt);
 
         // sqlite3_close(db);
       });
-
-      // std::ofstream out(("/tmp/fexcache/" + filename).c_str(), std::ios_base::binary | std::ios_base::app);
-      // out.write((const char*)CodePtr, DebugData->HostCodeSize);
-      // for (auto& Subblock : DebugData->Subblocks) {
-      //   fextl::fmt::print(stderr, "subblock: {:#x} / {:#x}\n", Subblock.HostCodeOffset, Subblock.HostCodeSize);
-      // }
-
-      // if (DebugData->Relocations && !DebugData->Relocations->empty()) {
-      //   for (auto& reloc : *DebugData->Relocations) {
-      //     fextl::fmt::print(stderr, "reloc: {}", (int)reloc.Header.Type);
-      //   }
-      // } else {
-      //   fextl::fmt::print(stderr, "No relocations\n");
-      // }
-      // out.write((const char*)DebugData->Relocations->data(), DebugData->Relocations->size() * sizeof(DebugData->Relocations[0]));
     }
-    // std::terminate();
   }
 
   // The core managed to compile the code.
@@ -1143,6 +1142,19 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
   return (uintptr_t)CodePtr;
 }
 
+} // namespace FEXCore::Context
+
+void FlushCodeCache() {
+  if (!g_CodeInvalidationMutex) {
+    return;
+  }
+  // fextl::fmt::print(stderr, "FLUSHCODECACHE {}\n", ::getpid());
+  // std::unique_lock lock {*g_CodeInvalidationMutex};
+  auto lk = FEXCore::GuardSignalDeferringSectionWithFallback<std::unique_lock>(*g_CodeInvalidationMutex, nullptr);
+  FEXCore::Context::dbs.clear();
+}
+
+namespace FEXCore::Context {
 void ContextImpl::ExecutionThread(FEXCore::Core::InternalThreadState* Thread) {
   Thread->ExitReason = FEXCore::Context::ExitReason::EXIT_WAITING;
 
@@ -1172,6 +1184,8 @@ void ContextImpl::ExecutionThread(FEXCore::Core::InternalThreadState* Thread) {
     // Ensure the Code Object Serialization service has fully serialized this thread's data before clearing the cache
     // Use the thread's object cache ref counter for this
     CodeSerialize::CodeObjectSerializeService::WaitForEmptyJobQueue(&Thread->ObjectCacheRefCounter);
+    auto lk = FEXCore::GuardSignalDeferringSection<std::unique_lock>(*g_CodeInvalidationMutex, Thread);
+    dbs.clear();
   }
 
   // If it is the parent thread that died then just leave

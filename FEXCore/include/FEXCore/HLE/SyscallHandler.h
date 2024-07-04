@@ -4,6 +4,7 @@
 #include <shared_mutex>
 
 #include <FEXCore/IR/IR.h>
+#include <FEXCore/Utils/SignalScopeGuards.h>
 
 namespace FEXCore::IR {
 struct AOTIRCacheEntry;

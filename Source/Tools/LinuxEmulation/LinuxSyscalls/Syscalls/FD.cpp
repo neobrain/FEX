@@ -5,6 +5,7 @@ tags: LinuxSyscalls|syscalls-shared
 $end_info$
 */
 
+void FlushCodeCache();
 #include "LinuxSyscalls/Syscalls.h"
 #include "LinuxSyscalls/x64/Syscalls.h"
 #include "LinuxSyscalls/x32/Syscalls.h"
@@ -81,6 +82,7 @@ void RegisterFD(FEX::HLE::SyscallHandler* Handler) {
   REGISTER_SYSCALL_IMPL_FLAGS(dup3, SyscallFlags::OPTIMIZETHROUGH | SyscallFlags::NOSYNCSTATEONENTRY,
                               [](FEXCore::Core::CpuStateFrame* Frame, int oldfd, int newfd, int flags) -> uint64_t {
                                 flags = FEX::HLE::RemapFromX86Flags(flags);
+                                FlushCodeCache(); // Somehow steamwebhelper uses dup2 to overwrite our sqlite handles?
                                 uint64_t Result = ::dup3(oldfd, newfd, flags);
                                 SYSCALL_ERRNO();
                               });

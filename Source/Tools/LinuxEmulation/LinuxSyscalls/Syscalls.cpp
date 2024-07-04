@@ -61,6 +61,8 @@ $end_info$
 #include <sys/utsname.h>
 #include <unistd.h>
 
+void FlushCodeCache();
+
 namespace FEX::HLE {
 class SignalDelegator;
 SyscallHandler* _SyscallHandler {};
@@ -200,6 +202,8 @@ static bool IsShebangFilename(const fextl::string& Filename) {
 uint64_t ExecveHandler(FEXCore::Core::CpuStateFrame* Frame, const char* pathname, char* const* argv, char* const* envp, ExecveAtArgs Args) {
   auto SyscallHandler = FEX::HLE::_SyscallHandler;
   fextl::string Filename {};
+
+  FlushCodeCache();
 
   fextl::string RootFS = SyscallHandler->RootFSPath();
   ELFLoader::ELFContainer::ELFType Type {};

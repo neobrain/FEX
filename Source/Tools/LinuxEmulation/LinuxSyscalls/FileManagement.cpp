@@ -5,7 +5,7 @@ tags: LinuxSyscalls|common
 desc: Rootfs overlay logic
 $end_info$
 */
-
+void FlushCodeCache();
 #include "Common/Config.h"
 #include "Common/FDUtils.h"
 #include "Common/JSONPool.h"
@@ -536,6 +536,9 @@ uint64_t FileManager::Close(int fd) {
   }
 #endif
 
+  // TODO: Ugh
+  FlushCodeCache();
+
   return ::close(fd);
 }
 
@@ -549,6 +552,8 @@ uint64_t FileManager::CloseRange(unsigned int first, unsigned int last, unsigned
     RemoveFEXFDRange(first, last);
   }
 #endif
+
+  FlushCodeCache();
 
   return ::syscall(SYSCALL_DEF(close_range), first, last, flags);
 }

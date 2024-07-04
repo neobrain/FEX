@@ -178,7 +178,7 @@ endif()
 # Some defines for the softfloat library
 list(APPEND DEFINES "-DSOFTFLOAT_BUILTIN_CLZ")
 
-set (LIBS fmt::fmt xxHash::xxhash FEXHeaderUtils CodeEmitter)
+set (LIBS fmt::fmt xxHash::xxhash FEXHeaderUtils CodeEmitter sqlite3)
 
 if (ENABLE_VIXL_DISASSEMBLER OR ENABLE_VIXL_SIMULATOR)
   list (APPEND LIBS vixl)
