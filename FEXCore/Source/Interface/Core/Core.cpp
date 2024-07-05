@@ -112,8 +112,6 @@ ContextImpl::ContextImpl(const FEXCore::HostFeatures& Features)
   UpdateAtomicTSOEmulationConfig();
 }
 
-
-// struct TheDB : public fextl::unordered_map<fextl::string, std::unique_ptr<sqlite3, sqlite3_closer>> {};
 struct TheDB : public fextl::unordered_map<fextl::string, std::unique_ptr<sqlite3, decltype([](sqlite3* db) { sqlite3_close(db); })>> {};
 static TheDB dbs;
 
@@ -782,7 +780,6 @@ static sqlite3* OpenCacheDB(const fextl::string& filename, bool create) {
       return 1;
     }, nullptr);
 
-
     ret = sqlite3_exec(db, "PRAGMA journal_mode=WAL;", nullptr, nullptr, nullptr);
     if (ret) {
       fextl::fmt::print(stderr, "{}: FAILED TO SET WAL MODE: {} ({})\n", ::getpid(), sqlite3_errstr(ret), ret);
@@ -824,9 +821,6 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
       const auto& filename = GuestRIPLookup.Entry->FileId;
       // fextl::fmt::print(stderr, "LOOKING UP: {} <- {:#x} (ELF off {:#x})\n", filename, GuestRIP, GuestRIP - GuestRIPLookup.VAFileStart);
 
-      // std::invoke([&]() {
-      // TODO: Enable WAL for better concurrency (also consider PRAGMA schema.synchronous = NONE)
-
       // TODO: Add table for cache version (FEX build etc)
       // TODO: Add table for statistics (cache hits / misses, etc)
 
@@ -859,25 +853,11 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
         // fextl::fmt::print(stderr, "Got row for offset {:#x}: relocating {:#x} bytes from guest {:#x} / host {:#x} to guest {:#x}\n",
         //                   GuestRIP - GuestRIPLookup.VAFileStart, HostSize, OrigGuestAddr, OrigHostAddr, GuestRIP);
 
-        // fextl::fmt::print(stderr, "  {:02x}\n", fmt::join(blob, blob + HostSize, ""));
-        // fextl::fmt::print(stderr, "  {:02x}\n",
-        //                   fmt::join((const char*)Relocations, (const char*)Relocations + NumRelocations * sizeof(CPU::Relocation), ""));
         if (true) {
-          // // TODO: Don't leak memory
-          // auto CompiledCode =
-          //   (uint8_t*)mmap(0, (HostSize + 0xfff) & ~0xfff, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
           auto InputHostCode = blob;
-          // memcpy(CompiledCode, InputHostCode, HostSize);
-
-          // CodeSerialize::CodeObjectFileSection RelocationSetup {};
-          // RelocationSetup.HostCode = InputHostCode;
-          // RelocationSetup.NumRelocations = NumRelocations;
-          // RelocationSetup.Relocations = (const char*)Relocations;
           auto* CompiledCode = Thread->CPUBackend->RelocateJITObjectCode(GuestRIP, std::span {InputHostCode, InputHostCode + HostSize},
                                                                          std::span {Relocations, Relocations + NumRelocations});
           sqlite3_finalize(stmt);
-
-          // sqlite3_close(db);
 
           // fextl::fmt::print(stderr, "RETURNING and running {} (prev {:#x})\n", fmt::ptr(CompiledCode), OrigHostAddr);
           return {
@@ -892,12 +872,10 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
       } else if (ret != SQLITE_DONE) {
         ERROR_AND_DIE_FMT("FAILED TO RUN SELECT STATEMENT: {}{}\n", ret, sqlite3_errstr(ret));
       } else if (ret) {
-        // ERROR_AND_DIE_FMT("Cache query returned no results: {}\n", sqlite3_errstr(ret));
- //       fextl::fmt::print(stderr, "Cache query returned no results: {}\n", sqlite3_errstr(ret));
+        // Probably just not in the cache yet => continue without error
       }
       sqlite3_finalize(stmt);
 
-      // sqlite3_close(db);
 skip_load_cache:;
     }
   }
@@ -991,14 +969,7 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
 
       // TODO: It seems that CodePtr points to BlockEntry, but really we should cache all data starting from BlockBegin?
 
-      // fextl::fmt::print(stderr, "  {:02x}\n", fmt::join((char*)CodePtr, (char*)CodePtr + DebugData->HostCodeSize, ""));
-
       std::invoke([&]() {
-        // sqlite3* db;
-        // auto ret = sqlite3_open(("/tmp/fexcache/" + filename + ".db").c_str(), &db);
-        // if (ret) {
-        //   ERROR_AND_DIE_FMT("FAILED TO OPEN SQLITE DATABASE\n");
-        // }
         auto db = OpenCacheDB(filename, true);
         if (!db) {
           ERROR_AND_DIE_FMT("FAILED TO OPEN SQLITE DATABASE\n");
@@ -1071,15 +1042,12 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
 retry:
         ret = sqlite3_step(stmt);
         if (ret == SQLITE_DONE) {
-          //      fextl::fmt::print(stderr, "Row inserted\n");
         } else if (ret) {
           ret = sqlite3_extended_errcode(db);
           ERROR_AND_DIE_FMT("FAILED TO RUN INSERT STATEMENT: {} ({}) {} (readonly: {})\n", sqlite3_errstr(ret), ret, ::getpid(),
                             sqlite3_db_readonly(db, nullptr));
         }
         sqlite3_finalize(stmt);
-
-        // sqlite3_close(db);
       });
     }
   }
