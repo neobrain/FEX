@@ -112,7 +112,28 @@ ContextImpl::ContextImpl(const FEXCore::HostFeatures& Features)
   UpdateAtomicTSOEmulationConfig();
 }
 
-struct TheDB : public fextl::unordered_map<fextl::string, std::unique_ptr<sqlite3, decltype([](sqlite3* db) { sqlite3_close(db); })>> {};
+struct DBEntry {
+  using UniquePtr = std::unique_ptr<sqlite3, decltype([](sqlite3* db) { sqlite3_close(db); })>;
+  UniquePtr db;
+
+  sqlite3_stmt* read_query = nullptr;
+  sqlite3_stmt* create_query = nullptr;
+  sqlite3_stmt* write_query = nullptr;
+
+  ~DBEntry() {
+    if (read_query) {
+      sqlite3_finalize(read_query);
+    }
+    if (create_query) {
+      sqlite3_finalize(create_query);
+    }
+    if (write_query) {
+      sqlite3_finalize(write_query);
+    }
+  }
+};
+
+struct TheDB : public fextl::unordered_map<fextl::string, DBEntry> {};
 static TheDB dbs;
 
 ContextImpl::~ContextImpl() {
@@ -757,9 +778,11 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
 
 bool EnableCacheFor(uint64_t GuestRIP, const HLE::AOTIRCacheEntryLookupResult& Entry) {
   return true;
+  return Entry.Entry->FileId.starts_with("libnode");
 }
 
-static sqlite3* OpenCacheDB(const fextl::string& filename, bool create) {
+static DBEntry* OpenCacheDB(const fextl::string& filename, bool create) {
+  // TODO: Lookup like this is really expensive, since it involves a hash over the filename. Avoid doing this...
   auto dbit = dbs.find(filename);
   if (dbit == dbs.end()) {
     int flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX; // TODO: Is FULLMUTEX needed?
@@ -791,9 +814,9 @@ static sqlite3* OpenCacheDB(const fextl::string& filename, bool create) {
     }
 
     bool inserted;
-    std::tie(dbit, inserted) = dbs.emplace(filename, decltype(dbs)::mapped_type {db});
+    std::tie(dbit, inserted) = dbs.emplace(filename, DBEntry::UniquePtr {db});
   }
-  return dbit->second.get();
+  return &dbit->second;
 }
 
 ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalThreadState* Thread, uint64_t GuestRIP, uint64_t MaxInst) {
@@ -824,14 +847,22 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
       // TODO: Add table for cache version (FEX build etc)
       // TODO: Add table for statistics (cache hits / misses, etc)
 
-      int ret;
+      int ret = 0;
       auto db = OpenCacheDB(filename, false);
+      sqlite3_stmt* stmt;
       if (!db) {
         goto skip_load_cache;
       }
 
-      sqlite3_stmt* stmt;
-      ret = sqlite3_prepare_v2(db, "SELECT code, orig_guest_addr, host_addr, relocations FROM blocks WHERE guest_offset = ?", -1, &stmt, nullptr);
+      if (!db->read_query) {
+        ret = sqlite3_prepare_v2(db->db.get(), "SELECT code, orig_guest_addr, host_addr, relocations FROM blocks WHERE guest_offset = ?",
+                                 -1, &db->read_query, nullptr);
+        if (ret) {
+          ERROR_AND_DIE_FMT("FAILED TO PREPARE CREATE SELECT STATEMENT: {}\n", sqlite3_errstr(ret));
+        }
+      }
+
+      stmt = db->read_query;
       if (ret) {
         ERROR_AND_DIE_FMT("FAILED TO PREPARE CREATE SELECT STATEMENT: {}\n", sqlite3_errstr(ret));
       }
@@ -857,7 +888,7 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
           auto InputHostCode = blob;
           auto* CompiledCode = Thread->CPUBackend->RelocateJITObjectCode(GuestRIP, std::span {InputHostCode, InputHostCode + HostSize},
                                                                          std::span {Relocations, Relocations + NumRelocations});
-          sqlite3_finalize(stmt);
+          sqlite3_reset(stmt);
 
           // fextl::fmt::print(stderr, "RETURNING and running {} (prev {:#x})\n", fmt::ptr(CompiledCode), OrigHostAddr);
           return {
@@ -874,7 +905,7 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
       } else if (ret) {
         // Probably just not in the cache yet => continue without error
       }
-      sqlite3_finalize(stmt);
+      sqlite3_reset(stmt);
 
 skip_load_cache:;
     }
@@ -975,36 +1006,43 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
           ERROR_AND_DIE_FMT("FAILED TO OPEN SQLITE DATABASE\n");
         }
 
-        sqlite3_stmt* stmt;
-        auto ret = sqlite3_prepare_v2(db,
-                                      "CREATE TABLE IF NOT EXISTS blocks (guest_offset INTEGER PRIMARY KEY, orig_guest_addr INTEGER NOT "
-                                      "NULL, "
-                                      "host_addr INTEGER NOT NULL, code BLOB NOT NULL, guest_code BLOB NOT NULL, ir TEXT NOT NULL, "
-                                      "relocations "
-                                      "BLOB)",
-                                      -1, &stmt, nullptr);
-        if (ret) {
-          ERROR_AND_DIE_FMT("FAILED TO PREPARE CREATE STATEMENT: {} ({})\n", sqlite3_errstr(ret), ret);
+        int ret;
+        if (!db->create_query) {
+          auto ret = sqlite3_prepare_v2(db->db.get(),
+                                        "CREATE TABLE IF NOT EXISTS blocks (guest_offset INTEGER PRIMARY KEY, orig_guest_addr INTEGER NOT "
+                                        "NULL, "
+                                        "host_addr INTEGER NOT NULL, code BLOB NOT NULL, guest_code BLOB NOT NULL, ir TEXT NOT NULL, "
+                                        "relocations "
+                                        "BLOB)",
+                                        -1, &db->create_query, nullptr);
+          if (ret) {
+            ERROR_AND_DIE_FMT("FAILED TO PREPARE CREATE STATEMENT: {} ({})\n", sqlite3_errstr(ret), ret);
+          }
         }
+        sqlite3_stmt* stmt = db->create_query;
 
         ret = sqlite3_step(stmt);
         if (ret == SQLITE_DONE) {
         } else if (ret) {
           ERROR_AND_DIE_FMT("FAILED TO RUN CREATE STATEMENT: {} ({})\n", sqlite3_errstr(ret), ret);
         }
-        sqlite3_finalize(stmt);
+        sqlite3_reset(stmt);
 
-        // TODO: Also insert guest block hash for non-PIC guest code
-        ret = sqlite3_prepare_v2(db,
-                                 "INSERT OR " /*IGNORE*/ "REPLACE INTO blocks (guest_offset, orig_guest_addr, host_addr, code, guest_code, "
-                                 "ir, relocations) "
-                                 "VALUES "
-                                 // "INSERT OR IGNORE INTO blocks (guest_offset, host_addr, code, guest_code, ir, relocations) VALUES "
-                                 "(?, ?, ?, ?, ?, ?, ?)",
-                                 -1, &stmt, nullptr);
-        if (ret) {
-          ERROR_AND_DIE_FMT("FAILED TO PREPARE CREATE INSERT STATEMENT: {}\n", sqlite3_errstr(ret));
+        if (!db->write_query) {
+          // TODO: Also insert guest block hash for non-PIC guest code
+          ret = sqlite3_prepare_v2(db->db.get(),
+                                   "INSERT OR " /*IGNORE*/ "REPLACE INTO blocks (guest_offset, orig_guest_addr, host_addr, code, "
+                                   "guest_code, "
+                                   "ir, relocations) "
+                                   "VALUES "
+                                   // "INSERT OR IGNORE INTO blocks (guest_offset, host_addr, code, guest_code, ir, relocations) VALUES "
+                                   "(?, ?, ?, ?, ?, ?, ?)",
+                                   -1, &db->write_query, nullptr);
+          if (ret) {
+            ERROR_AND_DIE_FMT("FAILED TO PREPARE CREATE INSERT STATEMENT: {}\n", sqlite3_errstr(ret));
+          }
         }
+        stmt = db->write_query;
         ret = sqlite3_bind_int64(stmt, 1, GuestRIP - GuestRIPLookup.VAFileStart);
         if (ret) {
           ERROR_AND_DIE_FMT("FAILED TO BIND INT\n");
@@ -1039,15 +1077,14 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
         }
         static_assert(sizeof(DebugData->Relocations[0]) == 24);
 
-retry:
         ret = sqlite3_step(stmt);
         if (ret == SQLITE_DONE) {
         } else if (ret) {
-          ret = sqlite3_extended_errcode(db);
+          ret = sqlite3_extended_errcode(db->db.get());
           ERROR_AND_DIE_FMT("FAILED TO RUN INSERT STATEMENT: {} ({}) {} (readonly: {})\n", sqlite3_errstr(ret), ret, ::getpid(),
-                            sqlite3_db_readonly(db, nullptr));
+                            sqlite3_db_readonly(db->db.get(), nullptr));
         }
-        sqlite3_finalize(stmt);
+        sqlite3_reset(stmt);
       });
     }
   }
