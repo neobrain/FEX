@@ -776,69 +776,62 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
   };
 }
 
-bool EnableCacheFor(uint64_t GuestRIP, const HLE::AOTIRCacheEntryLookupResult& Entry) {
-  return true;
-  return Entry.Entry->FileId.starts_with("libnode");
-}
-
-static DBEntry* OpenCacheDB(const fextl::string& filename, bool create) {
-  // TODO: Lookup like this is really expensive, since it involves a hash over the filename. Avoid doing this...
-  auto dbit = dbs.find(filename);
-  if (dbit == dbs.end()) {
-    int flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX; // TODO: Is FULLMUTEX needed?
-    if (create) {
-      flags |= SQLITE_OPEN_CREATE;
-    }
-    sqlite3* db;
-    auto ret = sqlite3_open_v2(("/tmp/fexcache/" + filename + ".db").c_str(), &db, flags, nullptr);
-    if (ret) {
-      if (create) {
-        ERROR_AND_DIE_FMT("FAILED TO OPEN SQLITE DATABASE\n");
-      }
-      return nullptr;
-    }
-    sqlite3_busy_handler(db, [](void*, int attempt) {
-      // TODO: Consider falling back to re-compiling the current block instead of waiting
-      std::this_thread::yield();
-      return 1;
-    }, nullptr);
-
-    ret = sqlite3_exec(db, "PRAGMA journal_mode=WAL;", nullptr, nullptr, nullptr);
-    if (ret) {
-      fextl::fmt::print(stderr, "{}: FAILED TO SET WAL MODE: {} ({})\n", ::getpid(), sqlite3_errstr(ret), ret);
-    }
-    // NOTE: This may cause the database to be corrupt on system crash, but should survive application crashes just fine
-    ret = sqlite3_exec(db, "PRAGMA synchronous=OFF;", nullptr, nullptr, nullptr);
-    if (ret) {
-      fextl::fmt::print(stderr, "{}: FAILED TO SET SYNCH MODE: {} ({})\n", ::getpid(), sqlite3_errstr(ret), ret);
-    }
-
-    bool inserted;
-    std::tie(dbit, inserted) = dbs.emplace(filename, DBEntry::UniquePtr {db});
+class NewCache {
+  bool EnableCacheFor(uint64_t GuestRIP, const HLE::AOTIRCacheEntryLookupResult& Entry) {
+    return true;
+    return Entry.Entry->FileId.starts_with("libnode");
   }
-  return &dbit->second;
-}
 
-ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalThreadState* Thread, uint64_t GuestRIP, uint64_t MaxInst) {
-  // JIT Code object cache lookup
-  // if (CodeObjectCacheService) {
-  //   auto CodeCacheEntry = CodeObjectCacheService->FetchCodeObjectFromCache(GuestRIP);
-  //   if (CodeCacheEntry) {
-  //     auto CompiledCode = Thread->CPUBackend->RelocateJITObjectCode(GuestRIP, CodeCacheEntry);
-  //     if (CompiledCode) {
-  //       return {
-  //         .CompiledCode = CompiledCode,
-  //         .IR = nullptr,        // No IR/RA data generated
-  //         .DebugData = nullptr, // nullptr here ensures that code serialization doesn't occur on from cache read
-  //         .GeneratedIR = false, // nullptr here ensures IR cache mechanisms won't run
-  //         .StartAddr = 0,       // Unused
-  //         .Length = 0,          // Unused
-  //       };
-  //     }
-  //   }
-  // }
+  DBEntry* OpenCacheDB(const fextl::string& filename, bool create) {
+    // TODO: Lookup like this is really expensive, since it involves a hash over the filename. Avoid doing this...
+    auto dbit = dbs.find(filename);
+    if (dbit == dbs.end()) {
+      int flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX; // TODO: Is FULLMUTEX needed?
+      if (create) {
+        flags |= SQLITE_OPEN_CREATE;
+      }
+      sqlite3* db;
+      mkdir("/tmp/fexcache", 0700);
+      auto ret = sqlite3_open_v2(("/tmp/fexcache/" + filename + ".db").c_str(), &db, flags, nullptr);
+      if (ret) {
+        if (create) {
+          ret = sqlite3_extended_errcode(db);
+          // ERROR_AND_DIE_FMT("FAILED TO OPEN SQLITE DATABASE for {}: {} ({})\n", filename, sqlite3_errstr(ret), ret);
+          fextl::fmt::print(stderr, "FAILED TO OPEN SQLITE DATABASE for {}: {} ({})\n", filename, sqlite3_errstr(ret), ret);
+          // TODO: srt-bwrap uses the following:
+          // * mount("tmpfs", "/tmp", "tmpfs", MS_NOSUID|MS_NODEV, NULL) = 0
+          // * pivot_root("/tmp", "oldroot") = 0
+          // Both of these will cause problems, so we just won't fail for now.
+        }
+        return nullptr;
+      }
+      sqlite3_busy_handler(
+        db,
+        [](void*, int attempt) {
+        // TODO: Consider falling back to re-compiling the current block instead of waiting
+        std::this_thread::yield();
+        return 1;
+        },
+        nullptr);
 
-  if (true) {
+      ret = sqlite3_exec(db, "PRAGMA journal_mode=WAL;", nullptr, nullptr, nullptr);
+      if (ret) {
+        fextl::fmt::print(stderr, "{}: FAILED TO SET WAL MODE: {} ({})\n", ::getpid(), sqlite3_errstr(ret), ret);
+      }
+      // NOTE: This may cause the database to be corrupt on system crash, but should survive application crashes just fine
+      ret = sqlite3_exec(db, "PRAGMA synchronous=OFF;", nullptr, nullptr, nullptr);
+      if (ret) {
+        fextl::fmt::print(stderr, "{}: FAILED TO SET SYNCH MODE: {} ({})\n", ::getpid(), sqlite3_errstr(ret), ret);
+      }
+
+      bool inserted;
+      std::tie(dbit, inserted) = dbs.emplace(filename, DBEntry::UniquePtr {db});
+    }
+    return &dbit->second;
+  }
+
+public:
+  ContextImpl::CompileCodeResult Load(FEXCore::HLE::SyscallHandler* SyscallHandler, FEXCore::Core::InternalThreadState* Thread, uint64_t GuestRIP) {
     auto GuestRIPLookup = SyscallHandler->LookupAOTIRCacheEntry(Thread, GuestRIP);
     if (GuestRIPLookup.Entry && !GuestRIPLookup.Entry->Filename.empty() && EnableCacheFor(GuestRIP, GuestRIPLookup)) {
       const auto& filename = GuestRIPLookup.Entry->FileId;
@@ -873,6 +866,7 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
 
       ret = sqlite3_step(stmt);
       if (ret == SQLITE_ROW) {
+        // TODO: Consider sqlite3_blob_read instead
         auto blob = (const char*)sqlite3_column_blob(stmt, 0);
         auto OrigGuestAddr = sqlite3_column_int64(stmt, 1);
         auto OrigHostAddr = sqlite3_column_int64(stmt, 2);
@@ -909,6 +903,138 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
 
 skip_load_cache:;
     }
+
+    return {};
+  }
+
+  void Append(FEXCore::HLE::SyscallHandler* SyscallHandler, FEXCore::Core::InternalThreadState* Thread, std::span<std::byte> GuestCode,
+              std::span<std::byte> Code, std::span<const CPU::Relocation> Relocations) {
+    const uint64_t GuestRIP = reinterpret_cast<uintptr_t>(GuestCode.data());
+    auto GuestRIPLookup = SyscallHandler->LookupAOTIRCacheEntry(Thread, GuestRIP);
+    if (GuestRIPLookup.Entry && !GuestRIPLookup.Entry->Filename.empty() && EnableCacheFor(GuestRIP, GuestRIPLookup)) {
+      const auto& filename = GuestRIPLookup.Entry->FileId;
+      // fextl::fmt::print(stderr, "APPENDING TO: {} <- {:#x} ({}) (host ptr {}, ELF off {:#x})\n", filename, GuestRIP,
+      //                   DebugData->HostCodeSize, fmt::ptr(CodePtr), GuestRIP - GuestRIPLookup.VAFileStart);
+      // mkdir("/tmp/fexcache", 0700);
+
+      if (GuestRIP < GuestRIPLookup.VAFileStart) {
+        ERROR_AND_DIE_FMT("Invalid guest offset");
+      }
+
+      // TODO: It seems that CodePtr points to BlockEntry, but really we should cache all data starting from BlockBegin?
+
+      auto db = OpenCacheDB(filename, true);
+      if (!db) {
+        // Made non-fatal: bwrap triggers temporary failures opening the database while setting up its chroot via mount(tmpfs) and
+        // pivot_chroot
+        return;
+        // ERROR_AND_DIE_FMT("FAILED TO OPEN SQLITE DATABASE\n");
+      }
+
+      if (!db->create_query) {
+        auto ret = sqlite3_prepare_v2(db->db.get(),
+                                      "CREATE TABLE IF NOT EXISTS blocks (guest_offset INTEGER PRIMARY KEY, orig_guest_addr INTEGER NOT "
+                                      "NULL, "
+                                      "host_addr INTEGER NOT NULL, code BLOB NOT NULL, guest_code BLOB NOT NULL, ir TEXT NOT NULL, "
+                                      "relocations "
+                                      "BLOB)",
+                                      -1, &db->create_query, nullptr);
+        if (ret) {
+          ERROR_AND_DIE_FMT("FAILED TO PREPARE CREATE STATEMENT: {} ({})\n", sqlite3_errstr(ret), ret);
+        }
+      }
+      sqlite3_stmt* stmt = db->create_query;
+
+      auto ret = sqlite3_step(stmt);
+      if (ret == SQLITE_DONE) {
+      } else if (ret) {
+        ERROR_AND_DIE_FMT("FAILED TO RUN CREATE STATEMENT: {} ({})\n", sqlite3_errstr(ret), ret);
+      }
+      sqlite3_reset(stmt);
+
+      if (!db->write_query) {
+        // TODO: Also insert guest block hash for non-PIC guest code
+        ret = sqlite3_prepare_v2(db->db.get(),
+                                 "INSERT OR " /*IGNORE*/ "REPLACE INTO blocks (guest_offset, orig_guest_addr, host_addr, code, "
+                                 "guest_code, "
+                                 "ir, relocations) "
+                                 "VALUES "
+                                 // "INSERT OR IGNORE INTO blocks (guest_offset, host_addr, code, guest_code, ir, relocations) VALUES "
+                                 "(?, ?, ?, ?, ?, ?, ?)",
+                                 -1, &db->write_query, nullptr);
+        if (ret) {
+          ERROR_AND_DIE_FMT("FAILED TO PREPARE CREATE INSERT STATEMENT: {}\n", sqlite3_errstr(ret));
+        }
+      }
+      stmt = db->write_query;
+      ret = sqlite3_bind_int64(stmt, 1, GuestRIP - GuestRIPLookup.VAFileStart);
+      if (ret) {
+        ERROR_AND_DIE_FMT("FAILED TO BIND INT\n");
+      }
+      ret = sqlite3_bind_int64(stmt, 2, GuestRIP);
+      if (ret) {
+        ERROR_AND_DIE_FMT("FAILED TO BIND INT\n");
+      }
+      ret = sqlite3_bind_int64(stmt, 3, reinterpret_cast<uintptr_t>(Code.data()));
+      if (ret) {
+        ERROR_AND_DIE_FMT("FAILED TO BIND INT\n");
+      }
+      ret = sqlite3_bind_blob(stmt, 4, Code.data(), Code.size_bytes(), SQLITE_STATIC);
+      if (ret) {
+        ERROR_AND_DIE_FMT("FAILED TO BIND BLOB\n");
+      }
+      ret = sqlite3_bind_blob(stmt, 5, GuestCode.data(), GuestCode.size_bytes(), SQLITE_STATIC);
+      if (ret) {
+        ERROR_AND_DIE_FMT("FAILED TO BIND BLOB\n");
+      }
+      fextl::stringstream ss;
+      // auto IRView = IR->GetIRView();
+      // FEXCore::IR::Dump(&ss, &IRView, IR->RAData());
+      ret = sqlite3_bind_text(stmt, 6, ss.str().c_str(), -1, SQLITE_STATIC);
+      if (ret) {
+        ERROR_AND_DIE_FMT("FAILED TO BIND BLOB\n");
+      }
+      ret = sqlite3_bind_blob(stmt, 7, Relocations.empty() ? nullptr : Relocations.data(), Relocations.size_bytes(), SQLITE_STATIC);
+      if (ret) {
+        ERROR_AND_DIE_FMT("FAILED TO BIND BLOB\n");
+      }
+
+      ret = sqlite3_step(stmt);
+      if (ret == SQLITE_DONE) {
+      } else if (ret) {
+        ret = sqlite3_extended_errcode(db->db.get());
+        ERROR_AND_DIE_FMT("FAILED TO RUN INSERT STATEMENT: {} ({}) {} (readonly: {})\n", sqlite3_errstr(ret), ret, ::getpid(),
+                          sqlite3_db_readonly(db->db.get(), nullptr));
+      }
+      sqlite3_reset(stmt);
+    }
+  }
+};
+
+static NewCache new_cache;
+
+ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalThreadState* Thread, uint64_t GuestRIP, uint64_t MaxInst) {
+  // JIT Code object cache lookup
+  // if (CodeObjectCacheService) {
+  //   auto CodeCacheEntry = CodeObjectCacheService->FetchCodeObjectFromCache(GuestRIP);
+  //   if (CodeCacheEntry) {
+  //     auto CompiledCode = Thread->CPUBackend->RelocateJITObjectCode(GuestRIP, CodeCacheEntry);
+  //     if (CompiledCode) {
+  //       return {
+  //         .CompiledCode = CompiledCode,
+  //         .IR = nullptr,        // No IR/RA data generated
+  //         .DebugData = nullptr, // nullptr here ensures that code serialization doesn't occur on from cache read
+  //         .GeneratedIR = false, // nullptr here ensures IR cache mechanisms won't run
+  //         .StartAddr = 0,       // Unused
+  //         .Length = 0,          // Unused
+  //       };
+  //     }
+  //   }
+  // }
+
+  auto ret = new_cache.Load(SyscallHandler, Thread, GuestRIP);
+  if (ret.GeneratedIR) {
+    return ret;
   }
 
   if (SourcecodeResolver && Config.GDBSymbols()) {
@@ -985,108 +1111,10 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
     return 0;
   }
 
-  const bool EnableNewCodeCache = true;
-  if (EnableNewCodeCache && DebugData) {
-    auto GuestRIPLookup = SyscallHandler->LookupAOTIRCacheEntry(Thread, GuestRIP);
-    if (GuestRIPLookup.Entry && !GuestRIPLookup.Entry->Filename.empty() && EnableCacheFor(GuestRIP, GuestRIPLookup)) {
-      const auto& filename = GuestRIPLookup.Entry->FileId;
-      // fextl::fmt::print(stderr, "APPENDING TO: {} <- {:#x} ({}) (host ptr {}, ELF off {:#x})\n", filename, GuestRIP,
-      //                   DebugData->HostCodeSize, fmt::ptr(CodePtr), GuestRIP - GuestRIPLookup.VAFileStart);
-      // mkdir("/tmp/fexcache", 0700);
-
-      if (GuestRIP < GuestRIPLookup.VAFileStart) {
-        ERROR_AND_DIE_FMT("Invalid guest offset");
-      }
-
-      // TODO: It seems that CodePtr points to BlockEntry, but really we should cache all data starting from BlockBegin?
-
-      std::invoke([&]() {
-        auto db = OpenCacheDB(filename, true);
-        if (!db) {
-          ERROR_AND_DIE_FMT("FAILED TO OPEN SQLITE DATABASE\n");
-        }
-
-        int ret;
-        if (!db->create_query) {
-          auto ret = sqlite3_prepare_v2(db->db.get(),
-                                        "CREATE TABLE IF NOT EXISTS blocks (guest_offset INTEGER PRIMARY KEY, orig_guest_addr INTEGER NOT "
-                                        "NULL, "
-                                        "host_addr INTEGER NOT NULL, code BLOB NOT NULL, guest_code BLOB NOT NULL, ir TEXT NOT NULL, "
-                                        "relocations "
-                                        "BLOB)",
-                                        -1, &db->create_query, nullptr);
-          if (ret) {
-            ERROR_AND_DIE_FMT("FAILED TO PREPARE CREATE STATEMENT: {} ({})\n", sqlite3_errstr(ret), ret);
-          }
-        }
-        sqlite3_stmt* stmt = db->create_query;
-
-        ret = sqlite3_step(stmt);
-        if (ret == SQLITE_DONE) {
-        } else if (ret) {
-          ERROR_AND_DIE_FMT("FAILED TO RUN CREATE STATEMENT: {} ({})\n", sqlite3_errstr(ret), ret);
-        }
-        sqlite3_reset(stmt);
-
-        if (!db->write_query) {
-          // TODO: Also insert guest block hash for non-PIC guest code
-          ret = sqlite3_prepare_v2(db->db.get(),
-                                   "INSERT OR " /*IGNORE*/ "REPLACE INTO blocks (guest_offset, orig_guest_addr, host_addr, code, "
-                                   "guest_code, "
-                                   "ir, relocations) "
-                                   "VALUES "
-                                   // "INSERT OR IGNORE INTO blocks (guest_offset, host_addr, code, guest_code, ir, relocations) VALUES "
-                                   "(?, ?, ?, ?, ?, ?, ?)",
-                                   -1, &db->write_query, nullptr);
-          if (ret) {
-            ERROR_AND_DIE_FMT("FAILED TO PREPARE CREATE INSERT STATEMENT: {}\n", sqlite3_errstr(ret));
-          }
-        }
-        stmt = db->write_query;
-        ret = sqlite3_bind_int64(stmt, 1, GuestRIP - GuestRIPLookup.VAFileStart);
-        if (ret) {
-          ERROR_AND_DIE_FMT("FAILED TO BIND INT\n");
-        }
-        ret = sqlite3_bind_int64(stmt, 2, GuestRIP);
-        if (ret) {
-          ERROR_AND_DIE_FMT("FAILED TO BIND INT\n");
-        }
-        ret = sqlite3_bind_int64(stmt, 3, reinterpret_cast<uintptr_t>(CodePtr));
-        if (ret) {
-          ERROR_AND_DIE_FMT("FAILED TO BIND INT\n");
-        }
-        ret = sqlite3_bind_blob(stmt, 4, CodePtr, DebugData->HostCodeSize, SQLITE_STATIC);
-        if (ret) {
-          ERROR_AND_DIE_FMT("FAILED TO BIND BLOB\n");
-        }
-        ret = sqlite3_bind_blob(stmt, 5, (void*)GuestRIP, Length, SQLITE_STATIC);
-        if (ret) {
-          ERROR_AND_DIE_FMT("FAILED TO BIND BLOB\n");
-        }
-        fextl::stringstream ss;
-        // auto IRView = IR->GetIRView();
-        // FEXCore::IR::Dump(&ss, &IRView, IR->RAData());
-        ret = sqlite3_bind_text(stmt, 6, ss.str().c_str(), -1, SQLITE_STATIC);
-        if (ret) {
-          ERROR_AND_DIE_FMT("FAILED TO BIND BLOB\n");
-        }
-        ret = sqlite3_bind_blob(stmt, 7, DebugData->Relocations ? (void*)DebugData->Relocations->data() : nullptr,
-                                DebugData->Relocations ? std::span<CPU::Relocation> {*DebugData->Relocations}.size_bytes() : 0, SQLITE_STATIC);
-        if (ret) {
-          ERROR_AND_DIE_FMT("FAILED TO BIND BLOB\n");
-        }
-        static_assert(sizeof(DebugData->Relocations[0]) == 24);
-
-        ret = sqlite3_step(stmt);
-        if (ret == SQLITE_DONE) {
-        } else if (ret) {
-          ret = sqlite3_extended_errcode(db->db.get());
-          ERROR_AND_DIE_FMT("FAILED TO RUN INSERT STATEMENT: {} ({}) {} (readonly: {})\n", sqlite3_errstr(ret), ret, ::getpid(),
-                            sqlite3_db_readonly(db->db.get(), nullptr));
-        }
-        sqlite3_reset(stmt);
-      });
-    }
+  if (DebugData) {
+    new_cache.Append(SyscallHandler, Thread, std::span {reinterpret_cast<std::byte*>(GuestRIP), Length},
+                     std::span {reinterpret_cast<std::byte*>(CodePtr), DebugData->HostCodeSize},
+                     DebugData->Relocations ? *DebugData->Relocations : std::span<CPU::Relocation> {});
   }
 
   // The core managed to compile the code.
