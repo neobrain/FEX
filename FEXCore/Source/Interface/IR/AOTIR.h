@@ -41,6 +41,7 @@ struct DebugData : public FEXCore::Allocator::FEXAllocOperators {
   uint64_t HostCodeSize; ///< The size of the code generated in the host JIT
   fextl::vector<DebugDataSubblock> Subblocks;
   fextl::vector<DebugDataGuestOpcode> GuestOpcodes;
+  // TODO: Try turning into std::optional<fextl::vector>?
   fextl::vector<FEXCore::CPU::Relocation>* Relocations;
 };
 } // namespace FEXCore::Core

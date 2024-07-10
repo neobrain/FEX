@@ -36,7 +36,8 @@ $end_info$
 #include <unistd.h>
 #include <string.h>
 
-static constexpr size_t INITIAL_CODE_SIZE = 1024 * 1024 * 16;
+// static constexpr size_t INITIAL_CODE_SIZE = 1024 * 1024 * 16;
+static constexpr size_t INITIAL_CODE_SIZE = 1024 * 1024 * 128;
 // We don't want to move above 128MB atm because that means we will have to encode longer jumps
 static constexpr size_t MAX_CODE_SIZE = 1024 * 1024 * 128;
 

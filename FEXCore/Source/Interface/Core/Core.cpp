@@ -49,6 +49,7 @@ $end_info$
 #include <FEXCore/fextl/memory.h>
 #include <FEXCore/fextl/set.h>
 #include <FEXCore/fextl/sstream.h>
+#include <FEXCore/fextl/unordered_set.h>
 #include <FEXCore/fextl/vector.h>
 #include <FEXHeaderUtils/Syscalls.h>
 #include <FEXHeaderUtils/TodoDefines.h>
@@ -524,6 +525,7 @@ void ContextImpl::AddBlockMapping(FEXCore::Core::InternalThreadState* Thread, ui
   Thread->LookupCache->AddBlockMapping(Address, Ptr);
 }
 
+static thread_local fextl::unordered_set<FEXCore::IR::AOTIRCacheEntry*> entries;
 void ContextImpl::ClearCodeCache(FEXCore::Core::InternalThreadState* Thread) {
   FEXCORE_PROFILE_INSTANT("ClearCodeCache");
 
@@ -536,6 +538,7 @@ void ContextImpl::ClearCodeCache(FEXCore::Core::InternalThreadState* Thread) {
 
   Thread->LookupCache->ClearCache();
   Thread->CPUBackend->ClearCache();
+  entries.clear();
 }
 
 static void IRDumper(FEXCore::Core::InternalThreadState* Thread, IR::IREmitter* IREmitter, uint64_t GuestRIP, IR::RegisterAllocationData* RA) {
@@ -832,6 +835,8 @@ class NewCache {
 
 public:
   ContextImpl::CompileCodeResult Load(FEXCore::HLE::SyscallHandler* SyscallHandler, FEXCore::Core::InternalThreadState* Thread, uint64_t GuestRIP) {
+    ERROR_AND_DIE_FMT("SHOULD NOT BE CALLED ANYMORE WHILE WE BRING UP LOADALL");
+
     auto GuestRIPLookup = SyscallHandler->LookupAOTIRCacheEntry(Thread, GuestRIP);
     if (GuestRIPLookup.Entry && !GuestRIPLookup.Entry->Filename.empty() && EnableCacheFor(GuestRIP, GuestRIPLookup)) {
       const auto& filename = GuestRIPLookup.Entry->FileId;
@@ -856,9 +861,6 @@ public:
       }
 
       stmt = db->read_query;
-      if (ret) {
-        ERROR_AND_DIE_FMT("FAILED TO PREPARE CREATE SELECT STATEMENT: {}\n", sqlite3_errstr(ret));
-      }
       ret = sqlite3_bind_int64(stmt, 1, GuestRIP - GuestRIPLookup.VAFileStart);
       if (ret) {
         ERROR_AND_DIE_FMT("FAILED TO BIND INT\n");
@@ -905,6 +907,73 @@ skip_load_cache:;
     }
 
     return {};
+  }
+
+  void LoadAll(FEXCore::HLE::SyscallHandler* SyscallHandler, FEXCore::Core::InternalThreadState* Thread, ContextImpl& context,
+               const FEXCore::HLE::AOTIRCacheEntryLookupResult& GuestRIPLookup) {
+    if (GuestRIPLookup.Entry && !GuestRIPLookup.Entry->Filename.empty()) {
+      const auto& filename = GuestRIPLookup.Entry->FileId;
+      // fextl::fmt::print(stderr, "LOOKING UP: {} <- {:#x} (ELF off {:#x})\n", filename, GuestRIP, GuestRIP - GuestRIPLookup.VAFileStart);
+      fextl::fmt::print(stderr, "\nLOADING CACHE FOR {} in {}.{}\n", filename, ::getpid(), ::gettid());
+
+      // TODO: Add table for cache version (FEX build etc)
+      // TODO: Add table for statistics (cache hits / misses, etc)
+
+      if (dbs.contains(filename)) {
+        // Already previously loaded
+        // return;
+      }
+
+      int ret = 0;
+      auto db = OpenCacheDB(filename, false);
+      sqlite3_stmt* stmt;
+      if (!db) {
+        goto skip_load_cache;
+      }
+
+      ret = sqlite3_prepare_v2(db->db.get(), "SELECT code, guest_offset, host_addr, relocations FROM blocks", -1, &stmt, nullptr);
+      if (ret) {
+        ERROR_AND_DIE_FMT("FAILED TO PREPARE CREATE SELECT STATEMENT: {}\n", sqlite3_errstr(ret));
+      }
+
+      while (true) {
+        ret = sqlite3_step(stmt);
+        if (ret == SQLITE_ROW) {
+          // TODO: Consider sqlite3_blob_read instead
+          auto InputHostCode = (const char*)sqlite3_column_blob(stmt, 0);
+          auto GuestOffset = sqlite3_column_int64(stmt, 1);
+          auto HostSize = sqlite3_column_bytes(stmt, 0);
+
+          auto Relocations = (const CPU::Relocation*)sqlite3_column_blob(stmt, 3);
+          auto NumRelocations = sqlite3_column_bytes(stmt, 3) / sizeof(CPU::Relocation);
+
+          // fextl::fmt::print(stderr, "Got row for offset {:#x}: relocating {:#x} bytes from guest {:#x} / host {:#x} to guest {:#x}\n",
+          //                   GuestRIP - GuestRIPLookup.VAFileStart, HostSize, OrigGuestAddr, OrigHostAddr, GuestRIP);
+
+          auto GuestRIP = GuestOffset + GuestRIPLookup.VAFileStart;
+          fextl::fmt::print(stderr, "Adding code block at guest addr {:#x}+{:#x} = {:#x} ({})\n", GuestRIPLookup.VAFileStart, GuestOffset,
+                            GuestRIP, GuestRIPLookup.Entry->FileId);
+          if (filename.starts_with("libnode") && 0 == Thread->LookupCache->FindBlock(0x7fffe2676000) && GuestRIP != 0x7fffe2676000) {
+            ERROR_AND_DIE_FMT("WHAT2???");
+          }
+          auto* CompiledCode = Thread->CPUBackend->RelocateJITObjectCode(GuestRIP, std::span {InputHostCode, InputHostCode + HostSize},
+                                                                         std::span {Relocations, Relocations + NumRelocations});
+
+          context.AddBlockMapping(Thread, GuestRIP, CompiledCode);
+          if (filename.starts_with("libnode") && 0 == Thread->LookupCache->FindBlock(0x7fffe2676000)) {
+            ERROR_AND_DIE_FMT("WHAT???");
+          }
+        } else if (ret != SQLITE_DONE) {
+          ERROR_AND_DIE_FMT("FAILED TO RUN SELECT STATEMENT: {}{}\n", ret, sqlite3_errstr(ret));
+        } else if (ret) {
+          // Either done processing all blocks, or this is an uncached block => continue without error
+          break;
+        }
+      }
+      sqlite3_finalize(stmt);
+
+skip_load_cache:;
+    }
   }
 
   void Append(FEXCore::HLE::SyscallHandler* SyscallHandler, FEXCore::Core::InternalThreadState* Thread, std::span<std::byte> GuestCode,
@@ -1032,11 +1101,6 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
   //   }
   // }
 
-  auto ret = new_cache.Load(SyscallHandler, Thread, GuestRIP);
-  if (ret.GeneratedIR) {
-    return ret;
-  }
-
   if (SourcecodeResolver && Config.GDBSymbols()) {
     auto AOTIRCacheEntry = SyscallHandler->LookupAOTIRCacheEntry(Thread, GuestRIP);
     if (AOTIRCacheEntry.Entry && !AOTIRCacheEntry.Entry->ContainsCode) {
@@ -1106,15 +1170,41 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
     return HostCode;
   }
 
+  // if (false) {
+  //   auto ret = new_cache.Load(SyscallHandler, Thread, GuestRIP);
+  //   if (ret.GeneratedIR) {
+  //     return (uintptr_t)ret.CompiledCode;
+  //   }
+  // } else {
+  //   auto GuestRIPLookup = SyscallHandler->LookupAOTIRCacheEntry(Thread, GuestRIP);
+  //   if (!GuestRIPLookup.Entry) {
+  //     // Skip cache
+  //   } else if (entries.contains(GuestRIPLookup.Entry)) {
+  //     // ERROR_AND_DIE_FMT("NO LOOKUP CACHE HIT!!!!");
+  //   } else {
+  //     fextl::fmt::print(stderr, "LoadAll now {}", GuestRIPLookup.Entry->FileId);
+  //     // TODO: Only attempt once per library
+  //     new_cache.LoadAll(SyscallHandler, Thread, *this, GuestRIPLookup);
+  //     entries.insert(GuestRIPLookup.Entry);
+
+  //     // Retry loading from cache, otherwise trigger compilation
+  //     if (auto HostCode = Thread->LookupCache->FindBlock(GuestRIP)) {
+  //       return HostCode;
+  //     } else {
+  //       ERROR_AND_DIE_FMT("NO LOOKUP CACHE HIT?? {:#x} {}", GuestRIP, GuestRIPLookup.Entry->FileId);
+  //     }
+  //   }
+  // }
+
   auto [CodePtr, IR, DebugData, GeneratedIR, StartAddr, Length] = CompileCode(Thread, GuestRIP, MaxInst);
   if (CodePtr == nullptr) {
     return 0;
   }
 
   if (DebugData) {
-    new_cache.Append(SyscallHandler, Thread, std::span {reinterpret_cast<std::byte*>(GuestRIP), Length},
-                     std::span {reinterpret_cast<std::byte*>(CodePtr), DebugData->HostCodeSize},
-                     DebugData->Relocations ? *DebugData->Relocations : std::span<CPU::Relocation> {});
+    // new_cache.Append(SyscallHandler, Thread, std::span {reinterpret_cast<std::byte*>(GuestRIP), Length},
+    //                  std::span {reinterpret_cast<std::byte*>(CodePtr), DebugData->HostCodeSize},
+    //                  DebugData->Relocations ? *DebugData->Relocations : std::span<CPU::Relocation> {});
   }
 
   // The core managed to compile the code.

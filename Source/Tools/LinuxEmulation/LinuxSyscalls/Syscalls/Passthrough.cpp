@@ -6,6 +6,7 @@ tags: LinuxSyscalls|syscalls-shared
 $end_info$
 */
 
+void FlushCodeCache();
 #include "LinuxSyscalls/Syscalls.h"
 #include "LinuxSyscalls/x64/Syscalls.h"
 #include "LinuxSyscalls/x32/Syscalls.h"
@@ -350,8 +351,16 @@ void RegisterCommon(FEX::HLE::SyscallHandler* Handler) {
                                    SyscallPassthrough2<SYSCALL_DEF(mlock)>);
   REGISTER_SYSCALL_IMPL_PASS_FLAGS(munlock, SyscallFlags::OPTIMIZETHROUGH | SyscallFlags::NOSYNCSTATEONENTRY,
                                    SyscallPassthrough2<SYSCALL_DEF(munlock)>);
+  // REGISTER_SYSCALL_IMPL_PASS_FLAGS(pivot_root, SyscallFlags::OPTIMIZETHROUGH | SyscallFlags::NOSYNCSTATEONENTRY,
+  //                                  SyscallPassthrough2<SYSCALL_DEF(pivot_root)>);
   REGISTER_SYSCALL_IMPL_PASS_FLAGS(pivot_root, SyscallFlags::OPTIMIZETHROUGH | SyscallFlags::NOSYNCSTATEONENTRY,
-                                   SyscallPassthrough2<SYSCALL_DEF(pivot_root)>);
+                                   [](FEXCore::Core::CpuStateFrame* Frame, const char* newroot, const char* oldroot) -> uint64_t {
+                                     // fextl::fmt::print(stderr, "YOLO\n");
+
+                                     // FlushCodeCache();
+                                     return SyscallPassthrough2<SYSCALL_DEF(pivot_root)>(Frame, reinterpret_cast<uintptr_t>(newroot),
+                                                                                         reinterpret_cast<uintptr_t>(oldroot));
+                                   });
   REGISTER_SYSCALL_IMPL_PASS_FLAGS(chroot, SyscallFlags::OPTIMIZETHROUGH | SyscallFlags::NOSYNCSTATEONENTRY,
                                    SyscallPassthrough1<SYSCALL_DEF(chroot)>);
   REGISTER_SYSCALL_IMPL_PASS_FLAGS(sync, SyscallFlags::OPTIMIZETHROUGH | SyscallFlags::NOSYNCSTATEONENTRY, SyscallPassthrough0<SYSCALL_DEF(sync)>);

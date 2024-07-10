@@ -375,9 +375,10 @@ private:
    * InitializeCompiler is called inside of CreateThread, so you likely don't need this
    */
   void InitializeCompiler(FEXCore::Core::InternalThreadState* Thread);
-
+public: // TODO: Privat-ize
   void AddBlockMapping(FEXCore::Core::InternalThreadState* Thread, uint64_t Address, void* Ptr);
 
+private:
   IR::AOTIRCaptureCache IRCaptureCache;
   fextl::unique_ptr<FEXCore::CodeSerialize::CodeObjectSerializeService> CodeObjectCacheService;
 
