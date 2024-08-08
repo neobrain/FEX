@@ -39,7 +39,7 @@ public:
 
   [[nodiscard]]
   CPUBackend::CompiledCode CompileCode(uint64_t Entry, const FEXCore::IR::IRListView* IR, FEXCore::Core::DebugData* DebugData,
-                                       const FEXCore::IR::RegisterAllocationData* RAData) override;
+                                       const FEXCore::IR::RegisterAllocationData* RAData, uint64_t RegionId) override;
 
   [[nodiscard]]
   void* RelocateJITObjectCode(uint64_t Entry, std::span<const char> HostCode, std::span<const Relocation> Relocations) override;
