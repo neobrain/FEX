@@ -165,8 +165,9 @@ private:
   std::atomic<bool> AOTIRCaptureCacheWriteoutFlusing;
 
   fextl::queue<WriteOutFn> AOTIRCaptureCacheWriteoutQueue;
-
+public:
   FEXCore::IR::AOTCacheType AOTIRCache;
+private:
 
   Context::AOTIRLoaderCBFn AOTIRLoader;
   Context::AOTIRWriterCBFn AOTIRWriter;

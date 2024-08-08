@@ -598,6 +598,9 @@ int main(int argc, char** argv, char** const envp) {
   SignalDelegation->RegisterTLSState(ParentThread);
   ThunkHandler->RegisterTLSState(ParentThread);
 
+  // Load code cache for code mapped at start
+  CTX->FetchAOTIRCacheEntry(ParentThread->Thread, 0);
+
   // Pass in our VDSO thunks
   ThunkHandler->AppendThunkDefinitions(FEX::VDSO::GetVDSOThunkDefinitions(Loader.Is64BitMode()));
   SignalDelegation->SetVDSOSigReturn();

@@ -10,7 +10,7 @@ $end_info$
 
 #include <FEXCore/Utils/CompilerDefs.h>
 #include <FEXCore/fextl/string.h>
-#include <FEXCore/fextl/vector.h>
+#include <FEXCore/fextl/unordered_map.h>
 
 #include "ObjectCache/Relocations.h"
 
@@ -128,7 +128,7 @@ namespace CPU {
      */
     [[nodiscard]]
     virtual CompiledCode CompileCode(uint64_t Entry, const FEXCore::IR::IRListView* IR, FEXCore::Core::DebugData* DebugData,
-                                     const FEXCore::IR::RegisterAllocationData* RAData) = 0;
+                                     const FEXCore::IR::RegisterAllocationData* RAData, uint64_t RegionId) = 0;
 
     /**
      * @brief Relocates a block of code from the JIT code object cache
@@ -161,6 +161,7 @@ namespace CPU {
     [[nodiscard]]
     CodeBuffer* GetEmptyCodeBuffer();
 
+  public:
     // This is the current code buffer that we are tracking
     CodeBuffer* CurrentCodeBuffer {};
 
@@ -168,13 +169,31 @@ namespace CPU {
     CodeBuffer AllocateNewCodeBuffer(size_t Size);
     void FreeCodeBuffer(CodeBuffer Buffer);
 
-    void EmplaceNewCodeBuffer(CodeBuffer Buffer) {
-      CurrentCodeBuffer = &CodeBuffers.emplace_back(Buffer);
+    void EmplaceNewCodeBuffer(CodeBuffer Buffer, uint64_t RegionId = 0) {
+      if (RegionId == 0) {
+        CurrentCodeBuffer = &CodeBuffers.emplace_back(Buffer);
+        return;
+      }
+
+      auto [NewCodeBuffer, inserted] = LibCodeBuffers.emplace(RegionId, Buffer);
+      if (!inserted) {
+        ERROR_AND_DIE_FMT("Should have created a new code buffer");
+      }
+      CurrentCodeBuffer = &NewCodeBuffer->second;
     }
 
+  public:
+    void AllocateAndSetCodeBufferForRegion(uint64_t RegionId) {
+      auto Buffer = AllocateNewCodeBuffer(128 * 1024 * 1024); // TODO: Check limit
+      EmplaceNewCodeBuffer(Buffer, RegionId);
+    }
+
+  private:
     // This is the array of code buffers. Unless signals force us to keep more than
     // buffer, there will be only one entry here
     fextl::vector<CodeBuffer> CodeBuffers {};
+    // Map from region id to buffer
+    fextl::unordered_map<uint64_t, CodeBuffer> LibCodeBuffers {};
   };
 
 } // namespace CPU

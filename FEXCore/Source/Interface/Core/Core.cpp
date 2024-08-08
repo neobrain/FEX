@@ -78,6 +78,10 @@ $end_info$
 
 #include <sqlite3.h>
 
+namespace FEXCore::Core {
+NonMovableUniquePtr<FEXCore::LookupCache> InternalThreadState::LookupCache;
+}
+
 void FlushCodeCache();
 
 static FEXCore::ForkableSharedMutex* g_CodeInvalidationMutex = nullptr;
@@ -430,7 +434,10 @@ void ContextImpl::InitializeThreadTLSData(FEXCore::Core::InternalThreadState* Th
 void ContextImpl::InitializeCompiler(FEXCore::Core::InternalThreadState* Thread) {
   Thread->OpDispatcher = fextl::make_unique<FEXCore::IR::OpDispatchBuilder>(this);
   Thread->OpDispatcher->SetMultiblock(Config.Multiblock);
-  Thread->LookupCache = fextl::make_unique<FEXCore::LookupCache>(this);
+  if (!Thread->LookupCache) {
+    // TODO: Avoid singleton
+    Thread->LookupCache = fextl::make_unique<FEXCore::LookupCache>(this);
+  }
   Thread->FrontendDecoder = fextl::make_unique<FEXCore::Frontend::Decoder>(this);
   Thread->PassManager = fextl::make_unique<FEXCore::IR::PassManager>();
 
@@ -951,18 +958,18 @@ skip_load_cache:;
           //                   GuestRIP - GuestRIPLookup.VAFileStart, HostSize, OrigGuestAddr, OrigHostAddr, GuestRIP);
 
           auto GuestRIP = GuestOffset + GuestRIPLookup.VAFileStart;
-          fextl::fmt::print(stderr, "Adding code block at guest addr {:#x}+{:#x} = {:#x} ({})\n", GuestRIPLookup.VAFileStart, GuestOffset,
-                            GuestRIP, GuestRIPLookup.Entry->FileId);
-          if (filename.starts_with("libnode") && 0 == Thread->LookupCache->FindBlock(0x7fffe2676000) && GuestRIP != 0x7fffe2676000) {
-            ERROR_AND_DIE_FMT("WHAT2???");
-          }
+          // fextl::fmt::print(stderr, "Adding code block at guest addr {:#x}+{:#x} = {:#x} ({})\n", GuestRIPLookup.VAFileStart, GuestOffset,
+          //                   GuestRIP, GuestRIPLookup.Entry->FileId);
+          // if (filename.starts_with("libnode") && 0 == Thread->LookupCache->FindBlock(0x7fffe2676000) && GuestRIP != 0x7fffe2676000) {
+          //   ERROR_AND_DIE_FMT("WHAT2???");
+          // }
           auto* CompiledCode = Thread->CPUBackend->RelocateJITObjectCode(GuestRIP, std::span {InputHostCode, InputHostCode + HostSize},
                                                                          std::span {Relocations, Relocations + NumRelocations});
 
           context.AddBlockMapping(Thread, GuestRIP, CompiledCode);
-          if (filename.starts_with("libnode") && 0 == Thread->LookupCache->FindBlock(0x7fffe2676000)) {
-            ERROR_AND_DIE_FMT("WHAT???");
-          }
+          // if (filename.starts_with("libnode") && 0 == Thread->LookupCache->FindBlock(0x7fffe2676000)) {
+          //   ERROR_AND_DIE_FMT("WHAT???");
+          // }
         } else if (ret != SQLITE_DONE) {
           ERROR_AND_DIE_FMT("FAILED TO RUN SELECT STATEMENT: {}{}\n", ret, sqlite3_errstr(ret));
         } else if (ret) {
@@ -978,12 +985,17 @@ skip_load_cache:;
 
   void Append(FEXCore::HLE::SyscallHandler* SyscallHandler, FEXCore::Core::InternalThreadState* Thread, std::span<std::byte> GuestCode,
               std::span<std::byte> Code, std::span<const CPU::Relocation> Relocations) {
+
     const uint64_t GuestRIP = reinterpret_cast<uintptr_t>(GuestCode.data());
     auto GuestRIPLookup = SyscallHandler->LookupAOTIRCacheEntry(Thread, GuestRIP);
     if (GuestRIPLookup.Entry && !GuestRIPLookup.Entry->Filename.empty() && EnableCacheFor(GuestRIP, GuestRIPLookup)) {
       const auto& filename = GuestRIPLookup.Entry->FileId;
-      // fextl::fmt::print(stderr, "APPENDING TO: {} <- {:#x} ({}) (host ptr {}, ELF off {:#x})\n", filename, GuestRIP,
-      //                   DebugData->HostCodeSize, fmt::ptr(CodePtr), GuestRIP - GuestRIPLookup.VAFileStart);
+      // if (filename.starts_with("libc.so.6")) {
+      //   ERROR_AND_DIE_FMT("Shouldn't need to load libc for {:#x}: {}", GuestRIP, filename);
+      // }
+      // fextl::fmt::print(stderr, "APPENDING TO: {} <- {:#x} ({}) (host ptr {}, ELF off {:#x})\n", filename, GuestRIP, GuestCode.size_bytes(),
+      //                   fmt::ptr(Code.data()), GuestRIP - GuestRIPLookup.VAFileStart);
+      // ERROR_AND_DIE_FMT("NOOOO: {:#x}", GuestRIP - GuestRIPLookup.VAFileStart);
       // mkdir("/tmp/fexcache", 0700);
 
       if (GuestRIP < GuestRIPLookup.VAFileStart) {
@@ -1101,8 +1113,8 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
   //   }
   // }
 
+  auto AOTIRCacheEntry = SyscallHandler->LookupAOTIRCacheEntry(Thread, GuestRIP);
   if (SourcecodeResolver && Config.GDBSymbols()) {
-    auto AOTIRCacheEntry = SyscallHandler->LookupAOTIRCacheEntry(Thread, GuestRIP);
     if (AOTIRCacheEntry.Entry && !AOTIRCacheEntry.Entry->ContainsCode) {
       AOTIRCacheEntry.Entry->SourcecodeMap = SourcecodeResolver->GenerateMap(AOTIRCacheEntry.Entry->Filename, AOTIRCacheEntry.Entry->FileId);
     }
@@ -1145,7 +1157,8 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
     // FEX currently throws away the CPUBackend::CompiledCode object other than the entrypoint
     // In the future with code caching getting wired up, we will pass the rest of the data forward.
     // TODO: Pass the data forward when code caching is wired up to this.
-    .CompiledCode = Thread->CPUBackend->CompileCode(GuestRIP, &IRView, DebugData, IR->RAData()).BlockEntry,
+    .CompiledCode =
+      Thread->CPUBackend->CompileCode(GuestRIP, &IRView, DebugData, IR->RAData(), reinterpret_cast<uint64_t>(AOTIRCacheEntry.Entry)).BlockEntry,
     .IR = std::move(IR),
     .DebugData = DebugData,
     .GeneratedIR = true,
@@ -1202,9 +1215,9 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
   }
 
   if (DebugData) {
-    // new_cache.Append(SyscallHandler, Thread, std::span {reinterpret_cast<std::byte*>(GuestRIP), Length},
-    //                  std::span {reinterpret_cast<std::byte*>(CodePtr), DebugData->HostCodeSize},
-    //                  DebugData->Relocations ? *DebugData->Relocations : std::span<CPU::Relocation> {});
+    new_cache.Append(SyscallHandler, Thread, std::span {reinterpret_cast<std::byte*>(GuestRIP), Length},
+                     std::span {reinterpret_cast<std::byte*>(CodePtr), DebugData->HostCodeSize},
+                     DebugData->Relocations ? *DebugData->Relocations : std::span<CPU::Relocation> {});
   }
 
   // The core managed to compile the code.
@@ -1444,8 +1457,30 @@ void ContextImpl::RemoveCustomIREntrypoint(uintptr_t Entrypoint) {
   HasCustomIRHandlers = !CustomIRHandlers.empty();
 }
 
-IR::AOTIRCacheEntry* ContextImpl::LoadAOTIRCacheEntry(const fextl::string& filename, fextl::vector<uint8_t> FileId) {
+IR::AOTIRCacheEntry* ContextImpl::LoadAOTIRCacheEntry(FEXCore::Core::InternalThreadState* Thread, uintptr_t GuestRIP,
+                                                      const fextl::string& filename, fextl::vector<uint8_t> FileId) {
   return IRCaptureCache.LoadAOTIRCacheEntry(filename, std::move(FileId));
+}
+
+void ContextImpl::FetchAOTIRCacheEntry(FEXCore::Core::InternalThreadState* Thread, uintptr_t GuestRIP) {
+  if (!GuestRIP) {
+    fextl::unordered_set<uint64_t> Bases;
+    SyscallHandler->ForEachVMAMapping(Thread, [&Bases](uint64_t Base) { Bases.insert(Base); });
+    for (auto Base : Bases) {
+      FetchAOTIRCacheEntry(Thread, Base);
+    }
+    return;
+  }
+  auto GuestRIPLookup = SyscallHandler->LookupAOTIRCacheEntry(Thread, GuestRIP);
+  if (!GuestRIPLookup.Entry) {
+    // Skip cache
+  } else {
+    auto OldCodeBuffer = Thread->CPUBackend->CurrentCodeBuffer;
+    Thread->CPUBackend->AllocateAndSetCodeBufferForRegion(reinterpret_cast<uintptr_t>(GuestRIPLookup.Entry));
+    fextl::fmt::print(stderr, "LoadAll to {:#x} now {}", GuestRIP, GuestRIPLookup.Entry->FileId);
+    new_cache.LoadAll(SyscallHandler, Thread, *this, GuestRIPLookup);
+    Thread->CPUBackend->CurrentCodeBuffer = OldCodeBuffer;
+  }
 }
 
 void ContextImpl::UnloadAOTIRCacheEntry(IR::AOTIRCacheEntry* Entry) {

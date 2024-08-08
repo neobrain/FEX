@@ -386,6 +386,15 @@ namespace CPU {
       }
     }
 
+    for (auto& Buffer : LibCodeBuffers) {
+      auto start = (uintptr_t)Buffer.second.Ptr;
+      auto end = start + Buffer.second.Size;
+
+      if (Address >= start && Address < end) {
+        return true;
+      }
+    }
+
     return false;
   }
 
