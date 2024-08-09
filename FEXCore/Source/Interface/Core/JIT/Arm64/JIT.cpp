@@ -918,7 +918,8 @@ void* Arm64JITCore::RelocateJITObjectCode(uint64_t Entry, std::span<const char> 
     CursorIncrement(sizeof(JITCodeTail));
   }
 
-  CPU.EnsureIAndDCacheCoherency(reinterpret_cast<void*>(RelocatedCode), HostCode.size_bytes());
+  // TODO: Drop use of vixl
+  vixl::aarch64::CPU::EnsureIAndDCacheCoherency(reinterpret_cast<void*>(RelocatedCode), HostCode.size_bytes());
 
   return RelocatedCode;
 }
