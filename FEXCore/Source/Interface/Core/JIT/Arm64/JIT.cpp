@@ -919,7 +919,9 @@ void* Arm64JITCore::RelocateJITObjectCode(uint64_t Entry, std::span<const char> 
   }
 
   // TODO: Drop use of vixl
-  vixl::aarch64::CPU::EnsureIAndDCacheCoherency(reinterpret_cast<void*>(RelocatedCode), HostCode.size_bytes());
+  // vixl::aarch64::CPU::EnsureIAndDCacheCoherency(reinterpret_cast<void*>(RelocatedCode), HostCode.size_bytes());
+  ClearICache(reinterpret_cast<void*>(RelocatedCode), HostCode.size_bytes());
+
 
   return RelocatedCode;
 }
