@@ -623,6 +623,45 @@ struct GuestWrapperForHostFunction<Result(Args...), GuestArgs...> {
   }
 };
 
+
+template<typename, typename...>
+struct TypeEraseForABI;
+
+template<typename Result, typename... Args>
+[[gnu::noinline]]
+Result CountMe(Args...) {};
+
+template<typename T>
+auto TypeEraseArg(T t) {
+  if constexpr (std::is_pointer_v<T>) {
+    return std::add_pointer_t<void> {};
+  } else if constexpr (std::is_integral_v<T> || std::is_enum_v<T>) {
+    if constexpr (sizeof(T) == 1) {
+      return char {};
+    } else if constexpr (sizeof(T) == 2) {
+      return int16_t {};
+    } else if constexpr (sizeof(T) == 4) {
+      return int32_t {};
+    } else if constexpr (sizeof(T) == 8) {
+      return int64_t {};
+    }
+  } else {
+    return t;
+  }
+}
+
+template<typename Result, typename... Args, typename... GuestArgs>
+struct TypeEraseForABI<Result(Args...), GuestArgs...> {
+  // Host functions called from Guest
+  // NOTE: GuestArgs typically matches up with Args, however there may be exceptions (e.g. size_t)
+  template<ParameterAnnotations RetAnnotations, ParameterAnnotations... Annotations>
+  static void Call(void* argsv) {
+    using NewResult =
+      std::conditional_t<std::is_void_v<Result>, void, decltype(TypeEraseArg(std::declval<std::conditional_t<std::is_void_v<Result>, int, Result>>()))>;
+    (void)CountMe<NewResult>(TypeEraseArg(Args {})...);
+  }
+};
+
 template<typename FuncType>
 void MakeHostTrampolineForGuestFunctionAt(uintptr_t GuestTarget, uintptr_t GuestUnpacker, FuncType** Func) {
   *Func = (FuncType*)FEX::HLE::MakeHostTrampolineForGuestFunction((void*)&CallbackUnpack<FuncType>::CallGuestPtr, GuestTarget, GuestUnpacker);

@@ -773,6 +773,51 @@ void GenerateThunkLibsAction::OnAnalysisComplete(clang::ASTContext& context) {
     file << "  { nullptr, nullptr }\n";
     file << "};\n";
 
+
+    file << "void* exportsForRyan[] = {\n";
+
+    // NOTE: The function parameters may differ slightly between guest and host,
+    //       e.g. due to differing sizes or due to data layout differences.
+    //       Hence, two separate parameter lists are managed here.
+    for (auto& host_funcptr_entry : thunked_funcptrs) {
+      auto& [type, param_annotations] = host_funcptr_entry.second;
+      auto func_type = type->getAs<clang::FunctionProtoType>();
+      FuncPtrInfo info = {};
+
+      // TODO: Use GetTypeNameWithFixedSizeIntegers
+      info.result = func_type->getReturnType().getAsString();
+
+      // NOTE: In guest contexts, integer types must be mapped to
+      //       fixed-size equivalents. Since this is a host context, this
+      //       isn't strictly necessary here, but it makes matching up
+      //       guest_layout/host_layout constructors easier.
+      for (auto arg : func_type->getParamTypes()) {
+        info.args.push_back(GetTypeNameWithFixedSizeIntegers(context, arg));
+      }
+
+      std::string annotations;
+      for (int param_idx = -1; param_idx < (int)info.args.size(); ++param_idx) {
+        if (param_idx != -1) {
+          annotations += ", ";
+        }
+
+        annotations += "ParameterAnnotations {";
+        if (param_annotations.contains(param_idx) && param_annotations.at(param_idx).is_passthrough) {
+          annotations += ".is_passthrough=true,";
+        }
+        if (param_annotations.contains(param_idx) && param_annotations.at(param_idx).assume_compatible) {
+          annotations += ".assume_compatible=true,";
+        }
+        annotations += "}";
+      }
+      auto guest_info = LookupGuestFuncPtrInfo(host_funcptr_entry.first.c_str());
+      // TODO: Consider differences in guest/host return types
+      fmt::print(file, "  (void*)&TypeEraseForABI<{}({}){}{}>::Call<{}>, // {}\n", guest_info.result, fmt::join(info.args, ", "),
+                 guest_info.args.empty() ? "" : ", ", fmt::join(guest_info.args, ", "), annotations, host_funcptr_entry.first);
+    }
+
+    file << "};\n";
+
     // Symbol lookup from native host library
     file << "static void* fexldr_ptr_" << libname << "_so;\n";
     file << "extern \"C\" bool fexldr_init_" << libname << "() {\n";
