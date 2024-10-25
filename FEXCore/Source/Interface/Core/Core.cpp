@@ -78,6 +78,10 @@ $end_info$
 
 #include <sqlite3.h>
 
+namespace FEXCore::Core {
+NonMovableUniquePtr<FEXCore::LookupCache> InternalThreadState::LookupCache;
+}
+
 void FlushCodeCache();
 
 static FEXCore::ForkableSharedMutex* g_CodeInvalidationMutex = nullptr;
@@ -419,7 +423,10 @@ void ContextImpl::ExecuteThread(FEXCore::Core::InternalThreadState* Thread) {
 void ContextImpl::InitializeCompiler(FEXCore::Core::InternalThreadState* Thread) {
   Thread->OpDispatcher = fextl::make_unique<FEXCore::IR::OpDispatchBuilder>(this);
   Thread->OpDispatcher->SetMultiblock(Config.Multiblock);
-  Thread->LookupCache = fextl::make_unique<FEXCore::LookupCache>(this);
+  if (!Thread->LookupCache) {
+    // TODO: Avoid singleton
+    Thread->LookupCache = fextl::make_unique<FEXCore::LookupCache>(this);
+  }
   Thread->FrontendDecoder = fextl::make_unique<FEXCore::Frontend::Decoder>(this);
   Thread->PassManager = fextl::make_unique<FEXCore::IR::PassManager>();
 
