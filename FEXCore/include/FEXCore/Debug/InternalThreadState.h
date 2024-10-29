@@ -89,7 +89,7 @@ struct InternalThreadState : public FEXCore::Allocator::FEXAllocOperators {
   NonMovableUniquePtr<FEXCore::IR::OpDispatchBuilder> OpDispatcher;
 
   NonMovableUniquePtr<FEXCore::CPU::CPUBackend> CPUBackend;
-  FEXCore::LookupCache* LookupCache;
+  NonMovableUniquePtr<FEXCore::LookupCache> LookupCache;
 
   NonMovableUniquePtr<FEXCore::Frontend::Decoder> FrontendDecoder;
   NonMovableUniquePtr<FEXCore::IR::PassManager> PassManager;
