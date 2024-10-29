@@ -247,6 +247,8 @@ public:
   SignalDelegator* SignalDelegation {};
   X86GeneratedCode X86CodeGen;
 
+  fextl::unique_ptr<FEXCore::LookupCache> LookupCache;
+
   ContextImpl(const FEXCore::HostFeatures& Features);
   ~ContextImpl();
 

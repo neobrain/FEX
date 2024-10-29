@@ -78,10 +78,6 @@ $end_info$
 
 #include <sqlite3.h>
 
-namespace FEXCore::Core {
-NonMovableUniquePtr<FEXCore::LookupCache> InternalThreadState::LookupCache;
-}
-
 void FlushCodeCache();
 
 static FEXCore::ForkableSharedMutex* g_CodeInvalidationMutex = nullptr;
@@ -358,6 +354,8 @@ bool ContextImpl::InitCore() {
   // Initialize the CPU core signal handlers & DispatcherConfig
   Dispatcher = FEXCore::CPU::Dispatcher::Create(this);
 
+  LookupCache = fextl::make_unique<FEXCore::LookupCache>(this);
+
   // Set up the SignalDelegator config since core is initialized.
   FEXCore::SignalDelegator::SignalDelegatorConfig SignalConfig {
     .DispatcherBegin = Dispatcher->Start,
@@ -423,10 +421,6 @@ void ContextImpl::ExecuteThread(FEXCore::Core::InternalThreadState* Thread) {
 void ContextImpl::InitializeCompiler(FEXCore::Core::InternalThreadState* Thread) {
   Thread->OpDispatcher = fextl::make_unique<FEXCore::IR::OpDispatchBuilder>(this);
   Thread->OpDispatcher->SetMultiblock(Config.Multiblock);
-  if (!Thread->LookupCache) {
-    // TODO: Avoid singleton
-    Thread->LookupCache = fextl::make_unique<FEXCore::LookupCache>(this);
-  }
   Thread->FrontendDecoder = fextl::make_unique<FEXCore::Frontend::Decoder>(this);
   Thread->PassManager = fextl::make_unique<FEXCore::IR::PassManager>();
 
@@ -451,6 +445,7 @@ FEXCore::Core::InternalThreadState*
 ContextImpl::CreateThread(uint64_t InitialRIP, uint64_t StackPointer, const FEXCore::Core::CPUState* NewThreadState, uint64_t ParentTID) {
   FEXCore::Core::InternalThreadState* Thread = new FEXCore::Core::InternalThreadState {
     .CTX = this,
+    .LookupCache = LookupCache.get(),
   };
 
   Thread->CurrentFrame->State.gregs[X86State::REG_RSP] = StackPointer;
@@ -1333,6 +1328,9 @@ void ContextImpl::MarkMemoryShared(FEXCore::Core::InternalThreadState* Thread) {
     UpdateAtomicTSOEmulationConfig();
 
     if (Config.TSOAutoMigration) {
+      fextl::fmt::print(stderr, "ERROR: MAY NOT USE TSO AUTO MIGRATION WITH CODE CACHING\n");
+      ERROR_AND_DIE_FMT("ERROR: MAY NOT USE TSO AUTO MIGRATION WITH CODE CACHING");
+
       // Only the lookup cache is cleared here, so that old code can keep running until next compilation
       std::lock_guard<std::recursive_mutex> lkLookupCache(Thread->LookupCache->WriteLock);
       Thread->LookupCache->ClearCache();
