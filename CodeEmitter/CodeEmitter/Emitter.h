@@ -588,13 +588,11 @@ constexpr bool AreVectorsSequential(T first, const Args&... args) {
   // Ensure we always have a pair of registers to compare against.
   static_assert(sizeof...(args) >= 1, "Number of arguments must be greater than 1");
 
-  const auto fn = [](auto& lhs, const auto& rhs) {
-    const auto result = ((lhs.Idx() + 1) % 32) == rhs.Idx();
-    lhs = rhs;
-    return result;
+  const auto fn = [](const auto& lhs, const auto& rhs) {
+    return ((lhs.Idx() + 1) % 32) == rhs.Idx();
   };
 
-  return (fn(first, args) && ...);
+  return (fn(std::exchange(first, args), args) && ...);
 }
 
 // Returns if the immediate can fit in to add/sub immediate instruction encodings.
