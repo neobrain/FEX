@@ -20,7 +20,7 @@ namespace FEXCore {
 //
 // A fork() only clones the parent's calling thread. Other threads are silently dropped, which permanently leaves any mutexes owned by them locked.
 // To address this issue, ForkableUniqueMutex and ForkableSharedMutex provide a way to forcefully remove any dangling locks and reset the mutexes to their default state.
-class ForkableUniqueMutex final {
+class ForkableUniqueMutex /*final*/ {
 public:
   ForkableUniqueMutex()
     : Mutex(PTHREAD_MUTEX_INITIALIZER) {}

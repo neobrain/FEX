@@ -73,6 +73,10 @@ $end_info$
 #include <utility>
 #include <xxhash.h>
 
+namespace FEXCore::CPU {
+extern mymutex codebuffermutex;
+}
+
 namespace FEXCore::Context {
 ContextImpl::ContextImpl(const FEXCore::HostFeatures& Features)
   : HostFeatures {Features}
@@ -426,6 +430,8 @@ void ContextImpl::InitializeCompiler(FEXCore::Core::InternalThreadState* Thread)
   // Create CPU backend
   Thread->PassManager->InsertRegisterAllocationPass();
   Thread->CPUBackend = FEXCore::CPU::CreateArm64JITCore(this, Thread);
+  Thread->LookupCache->Shared = Thread->CPUBackend->CurrentCodeBuffer->LookupCache.get();
+  Thread->LookupCache->WriteLock = Thread->LookupCache->Shared->WriteLock;
 
   Thread->PassManager->Finalize();
 }
@@ -492,7 +498,7 @@ void ContextImpl::LockBeforeFork(FEXCore::Core::InternalThreadState* Thread) {
 }
 #endif
 
-void ContextImpl::ClearCodeCache(FEXCore::Core::InternalThreadState* Thread) {
+void ContextImpl::ClearCodeCache(FEXCore::Core::InternalThreadState* Thread, bool NewCodeBuffer) {
   FEXCORE_PROFILE_INSTANT("ClearCodeCache");
 
   if (CodeObjectCacheService) {
@@ -500,10 +506,21 @@ void ContextImpl::ClearCodeCache(FEXCore::Core::InternalThreadState* Thread) {
     // Use the thread's object cache ref counter for this
     CodeSerialize::CodeObjectSerializeService::WaitForEmptyJobQueue(&Thread->ObjectCacheRefCounter);
   }
-  std::lock_guard<std::recursive_mutex> lk(Thread->LookupCache->WriteLock);
 
-  Thread->LookupCache->ClearCache();
-  Thread->CPUBackend->ClearCache();
+  if (NewCodeBuffer) {
+    // NOTE: Holding on to the reference here is required to ensure validity of the WriteLock mutex
+    std::shared_ptr CurrentCodeBuffer = Thread->CPUBackend->CurrentCodeBuffer;
+    std::lock_guard<std::recursive_mutex> lk(CurrentCodeBuffer->LookupCache->WriteLock);
+
+    // Allocate new CodeBuffer + L3 LookupCache, then clear L1+L2 caches
+    Thread->CPUBackend->ClearCache();
+    Thread->LookupCache->Shared = Thread->CPUBackend->CurrentCodeBuffer->LookupCache.get();
+    Thread->LookupCache->WriteLock = Thread->LookupCache->Shared->WriteLock;
+    Thread->LookupCache->ClearThreadLocalCaches();
+  } else {
+    // Clear L1+L2 cache of this thread, and clear L3 cache across any threads using it
+    Thread->LookupCache->ClearCache();
+  }
 }
 
 static void IRDumper(FEXCore::Core::InternalThreadState* Thread, IR::IREmitter* IREmitter, uint64_t GuestRIP, IR::RegisterAllocationData* RA) {
@@ -835,6 +852,8 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
 
   // Is the code in the cache?
   // The backends only check L1 and L2, not L3
+  auto lock = CPU::codebuffermutex.AcquireLock();
+
   if (auto HostCode = Thread->LookupCache->FindBlock(GuestRIP)) {
     return HostCode;
   }

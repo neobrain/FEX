@@ -76,7 +76,7 @@ struct CustomIRResult {
 using BlockDelinkerFunc = void (*)(FEXCore::Core::CpuStateFrame* Frame, FEXCore::Context::ExitFunctionLinkData* Record);
 constexpr uint32_t TSC_SCALE_MAXIMUM = 1'000'000'000; ///< 1Ghz
 
-class ContextImpl final : public FEXCore::Context::Context {
+class ContextImpl final : public FEXCore::Context::Context, CPU::CodeBufferManager {
 public:
   // Context base class implementation.
   bool InitCore() override;
@@ -167,7 +167,7 @@ public:
     IRCaptureCache.WriteFilesWithCode(Writer);
   }
 
-  void ClearCodeCache(FEXCore::Core::InternalThreadState* Thread) override;
+  void ClearCodeCache(FEXCore::Core::InternalThreadState* Thread, bool NewCodeBuffer = true) override;
   void InvalidateGuestCodeRange(FEXCore::Core::InternalThreadState* Thread, uint64_t Start, uint64_t Length) override;
   void InvalidateGuestCodeRange(FEXCore::Core::InternalThreadState* Thread, uint64_t Start, uint64_t Length, CodeRangeInvalidationFn callback) override;
   FEXCore::ForkableSharedMutex& GetCodeInvalidationMutex() override {

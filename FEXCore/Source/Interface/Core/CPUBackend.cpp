@@ -5,6 +5,8 @@
 #include "Interface/Core/CPUBackend.h"
 #include "Interface/Core/Dispatcher/Dispatcher.h"
 
+#include "LookupCache.h"
+
 #ifndef _WIN32
 #include <sys/prctl.h>
 #endif
@@ -259,10 +261,11 @@ namespace CPU {
     return TotalLUT;
   }()};
 
-  CPUBackend::CPUBackend(FEXCore::Core::InternalThreadState* ThreadState, size_t InitialCodeSize, size_t MaxCodeSize)
+  CPUBackend::CPUBackend(CodeBufferManager& manager, FEXCore::Core::InternalThreadState* ThreadState, size_t InitialCodeSize, size_t MaxCodeSize)
     : ThreadState(ThreadState)
     , InitialCodeSize(InitialCodeSize)
-    , MaxCodeSize(MaxCodeSize) {
+    , MaxCodeSize(MaxCodeSize)
+    , manager(manager) {
 
     auto& Common = ThreadState->CurrentFrame->Pointers.Common;
 
@@ -299,52 +302,127 @@ namespace CPU {
 #endif
   }
 
+  mymutex codebuffermutex;
+
   CPUBackend::~CPUBackend() {
-    for (auto CodeBuffer : CodeBuffers) {
-      FreeCodeBuffer(CodeBuffer);
-    }
-    CodeBuffers.clear();
+    // fmt::print(stderr, "~CPUBackend {}.{}\n", ::getpid(), ::gettid());
+    auto lock = codebuffermutex.AcquireLock();
+    CurrentCodeBuffer.reset();
+    SignalHandlerCodeBuffers.clear();
+    // TODO: Use this opportunity to clear stale weak_ptr references in manager
+    // while (!CodeBuffers.empty()) {
+    //   manager.ReleaseCodeBuffer(std::move(CodeBuffers.front()));
+    //   CodeBuffers.pop_front();
+    // }
+    // fmt::print(stderr, "~CPUBackend DONE\n");
   }
 
   auto CPUBackend::GetEmptyCodeBuffer() -> CodeBuffer* {
-    if (ThreadState->CurrentFrame->SignalHandlerRefCounter == 0) {
-      if (CodeBuffers.empty()) {
-        auto NewCodeBuffer = AllocateNewCodeBuffer(InitialCodeSize);
-        EmplaceNewCodeBuffer(NewCodeBuffer);
-      } else {
-        if (CodeBuffers.size() > 1) {
-          // If we have more than one code buffer we are tracking then walk them and delete
-          // This is a cleanup step
-          for (size_t i = 1; i < CodeBuffers.size(); i++) {
-            FreeCodeBuffer(CodeBuffers[i]);
-          }
-          CodeBuffers.resize(1);
-        }
-        // Set the current code buffer to the initial
-        CurrentCodeBuffer = &CodeBuffers[0];
+    // auto lock = codebuffermutex.AcquireLock();
+    codebuffermutex.AssertIsLocked();
+    // fmt::print(stderr, "GetEmptyCodeBuffer {}.{}\n", ::getpid(), ::gettid());
+    auto PrevCodeBuffer = CurrentCodeBuffer;
 
-        if (CurrentCodeBuffer->Size != MaxCodeSize) {
-          FreeCodeBuffer(*CurrentCodeBuffer);
-
-          // Resize the code buffer and reallocate our code size
-          CurrentCodeBuffer->Size *= 1.5;
-          CurrentCodeBuffer->Size = std::min(CurrentCodeBuffer->Size, MaxCodeSize);
-
-          *CurrentCodeBuffer = AllocateNewCodeBuffer(CurrentCodeBuffer->Size);
-        }
-      }
+    // Resize the code buffer and reallocate our code size
+    // TODO: Reconsider whether we should apply a maximum here
+    // TODO: Handle the CodeBuffers.empty() case more cleanly
+    if (manager.CodeBuffers.empty()) {
+      // Allocate initial CodeBuffer and return it
+      CurrentCodeBuffer = manager.GetCurrentCodeBuffer();
     } else {
-      // We have signal handlers that have generated code
-      // This means that we can not safely clear the code at this point in time
-      // Allocate some new code buffers that we can switch over to instead
-      auto NewCodeBuffer = AllocateNewCodeBuffer(InitialCodeSize);
-      EmplaceNewCodeBuffer(NewCodeBuffer);
+      auto NewCodeBufferSize = manager.GetCurrentCodeBufferSize();
+      NewCodeBufferSize = std::min<size_t>(NewCodeBufferSize * 2.0, MaxCodeSize);
+      CurrentCodeBuffer = manager.AllocateNewCodeBuffer(NewCodeBufferSize);
     }
 
-    return CurrentCodeBuffer;
+    if (ThreadState->CurrentFrame->SignalHandlerRefCounter != 0) {
+      // We have signal handlers that have generated code
+      // This means that we can not safely clear the code at this point in time
+      // Keep a reference to the old code buffer to delay deallocation
+      // TODO: Clear SignalHandlerCodeBuffers once SignalHandlerRefCounter reaches 0 again
+      // TODO: Actually, this should be added when entering the signal handler...
+      fprintf(stderr, "Adding CodeBuffer reference for signal handle\n");
+      SignalHandlerCodeBuffers.push_back(PrevCodeBuffer);
+    } else {
+      SignalHandlerCodeBuffers.clear();
+    }
+
+    return CurrentCodeBuffer.get();
   }
 
-  auto CPUBackend::AllocateNewCodeBuffer(size_t Size) -> CodeBuffer {
+  bool CPUBackend::CheckCodeBufferUpdate() {
+    codebuffermutex.AssertIsLocked();
+    auto NewCodeBuffer = manager.GetCurrentCodeBuffer();
+    if (CurrentCodeBuffer != NewCodeBuffer) {
+      fmt::print(stderr, "Moving to new CodeBuffer generation in thread {}.{}\n", ::getpid(), ::gettid());
+
+      auto Prev = CurrentCodeBuffer;
+      if (ThreadState->CurrentFrame->SignalHandlerRefCounter != 0) {
+        // We have signal handlers that have generated code
+        // This means that we can not safely clear the code at this point in time
+        // Keep a reference to the old code buffer to delay deallocation
+        // TODO: Clear SignalHandlerCodeBuffers once SignalHandlerRefCounter reaches 0 again
+        // TODO: Actually, this should be added when entering the signal handler...
+        //fprintf(stderr, "ADDING CodeBuffer reference for signal handle\n");
+        SignalHandlerCodeBuffers.push_back(Prev);
+      } else {
+        SignalHandlerCodeBuffers.clear();
+      }
+
+
+      CurrentCodeBuffer = NewCodeBuffer;
+      // TODO: Release code buffer if count is zero...
+      // TODO: Associate each CodeBuffer with a LookupCache template?
+      for (auto CodeBufferIt = manager.CodeBuffers.begin(); CodeBufferIt != manager.CodeBuffers.end();) {
+        if (CodeBufferIt->expired()) {
+          CodeBufferIt = manager.CodeBuffers.erase(CodeBufferIt);
+        } else {
+          ++CodeBufferIt;
+        }
+      }
+      NewCodeBuffer.reset();
+
+      fmt::print(stderr, "... now have {} buffers in total\n", manager.CodeBuffers.size());
+      for (auto CodeBufferIt = manager.CodeBuffers.begin(); CodeBufferIt != manager.CodeBuffers.end(); ++CodeBufferIt) {
+        auto Buffer = CodeBufferIt->lock();
+        fmt::print(stderr, "    {} KiB: {} uses{}{}\n", Buffer->Size / 1024, Buffer.use_count() - 1 - (Buffer == Prev),
+                   Buffer == manager.Latest ? " (active)" : "", Buffer == Prev ? " (previous in thread)" : "");
+      }
+      return true;
+    }
+    return false;
+  }
+
+  SharedLookupCache& GetLookupCache(const CodeBuffer& Buffer) {
+    return *Buffer.LookupCache;
+  }
+
+  CodeBuffer::CodeBuffer(size_t Size)
+    : Size(Size) {
+    codebuffermutex.AssertIsLocked();
+    Ptr = static_cast<uint8_t*>(FEXCore::Allocator::VirtualAlloc(Size, true));
+    LOGMAN_THROW_A_FMT(!!Ptr, "Couldn't allocate code buffer");
+    LookupCache = fextl::make_unique<SharedLookupCache>();
+  }
+
+  CodeBuffer::CodeBuffer(CodeBuffer&& oth)
+    : Ptr(oth.Ptr)
+    , Size(oth.Size)
+    , next(std::move(oth.next))
+    , LookupCache(std::move(oth.LookupCache)) {
+    oth.Ptr = nullptr;
+    oth.Size = 0;
+  }
+
+  CodeBuffer::~CodeBuffer() {
+    // TODO: Verify refcounts get appropriately released on forks!
+    codebuffermutex.AssertIsLocked();
+    // fmt::print(stderr, "Freeing code buffer {}-{}\n", fmt::ptr(Ptr), fmt::ptr(Ptr + Size));
+    FEXCore::Allocator::VirtualFree(Ptr, Size);
+  }
+
+  auto CodeBufferManager::AllocateNewCodeBuffer(size_t Size) -> fextl::shared_ptr<CodeBuffer> {
+    codebuffermutex.AssertIsLocked();
 #ifndef _WIN32
 // MDWE (Memory-Deny-Write-Execute) is a new Linux 6.3 feature.
 // It's equivalent to systemd's `MemoryDenyWriteExecute` but implemented entirely in the kernel.
@@ -370,25 +448,54 @@ namespace CPU {
     }
 #endif
 
-    CodeBuffer Buffer;
-    Buffer.Size = Size;
-    Buffer.Ptr = static_cast<uint8_t*>(FEXCore::Allocator::VirtualAlloc(Buffer.Size, true));
-    LOGMAN_THROW_A_FMT(!!Buffer.Ptr, "Couldn't allocate code buffer");
+    auto Buffer = fextl::make_shared<CodeBuffer>(Size);
 
-    if (static_cast<Context::ContextImpl*>(ThreadState->CTX)->Config.GlobalJITNaming()) {
-      static_cast<Context::ContextImpl*>(ThreadState->CTX)->Symbols.RegisterJITSpace(Buffer.Ptr, Buffer.Size);
+    // TODO: Re-enable
+    // if (static_cast<Context::ContextImpl*>(ThreadState->CTX)->Config.GlobalJITNaming()) {
+    //   static_cast<Context::ContextImpl*>(ThreadState->CTX)->Symbols.RegisterJITSpace(Buffer.Ptr, Buffer.Size);
+    // }
+
+    CodeBuffers.push_back(Buffer);
+    Latest = Buffer;
+    LatestOffset = 0;
+
+    for (auto CodeBufferIt = CodeBuffers.begin(); CodeBufferIt != CodeBuffers.end();) {
+      if (CodeBufferIt->expired()) {
+        CodeBufferIt = CodeBuffers.erase(CodeBufferIt);
+      } else {
+        ++CodeBufferIt;
+      }
     }
+
+    fprintf(stderr, "ALLOCATED CODEBUFFER OF SIZE %#x, now at %d in total\n", (int)Size, (int)CodeBuffers.size());
     return Buffer;
   }
 
-  void CPUBackend::FreeCodeBuffer(CodeBuffer Buffer) {
-    FEXCore::Allocator::VirtualFree(Buffer.Ptr, Buffer.Size);
+  fextl::shared_ptr<CodeBuffer> CodeBufferManager::GetCurrentCodeBuffer() {
+    codebuffermutex.AssertIsLocked();
+    if (!Latest) {
+      Latest = AllocateNewCodeBuffer(1024 * 1024 * /*128*/ /*16*/ 1); // TODO: Use InitialCodeSize instead
+      LatestOffset = 0;
+    }
+    return Latest;
   }
 
   bool CPUBackend::IsAddressInCodeBuffer(uintptr_t Address) const {
-    for (auto& Buffer : CodeBuffers) {
-      auto start = (uintptr_t)Buffer.Ptr;
-      auto end = start + Buffer.Size;
+    return manager.IsAddressInCodeBuffer(Address);
+  }
+  bool CodeBufferManager::IsAddressInCodeBuffer(uintptr_t Address) const {
+    auto lock = codebuffermutex.AcquireLock();
+    // fmt::print(stderr, "Checking if in code buffer...\n");
+
+    for (auto& BufferWeak : CodeBuffers) {
+      auto Buffer = BufferWeak.lock();
+      if (!Buffer) {
+        // TODO: Remove Buffer from CodeBuffers
+        continue;
+      }
+
+      auto start = (uintptr_t)Buffer->Ptr;
+      auto end = start + Buffer->Size;
 
       if (Address >= start && Address < end) {
         return true;

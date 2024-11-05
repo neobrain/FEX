@@ -16,6 +16,95 @@
 
 namespace FEXCore {
 
+struct SharedLookupCache {
+  std::recursive_mutex WriteLock;
+
+  struct BlockLinkTag {
+    uint64_t GuestDestination;
+    FEXCore::Context::ExitFunctionLinkData* HostLink;
+
+    bool operator<(const BlockLinkTag& other) const {
+      if (GuestDestination < other.GuestDestination) {
+        return true;
+      } else if (GuestDestination == other.GuestDestination) {
+        return HostLink < other.HostLink;
+      } else {
+        return false;
+      }
+    }
+  };
+
+  // Use a monotonic buffer resource to allocate both the std::pmr::map and its members.
+  // This allows us to quickly clear the block link map by clearing the monotonic allocator.
+  // If we had allocated the block link map without the MBR, then clearing the map would require slowly
+  // walking each block member and destructing objects.
+  //
+  // This makes `BlockLinks` look like a raw pointer that could memory leak, but since it is backed by the MBR, it won't.
+  std::pmr::monotonic_buffer_resource BlockLinks_mbr;
+  using BlockLinksMapType = std::pmr::map<BlockLinkTag, FEXCore::Context::BlockDelinkerFunc>;
+  fextl::unique_ptr<std::pmr::polymorphic_allocator<std::byte>> BlockLinks_pma;
+  BlockLinksMapType* BlockLinks;
+
+  // TODO: Should be shared across threads... Also BlockLinks, perhaps?
+  fextl::robin_map<uint64_t, uint64_t> BlockList;
+
+  SharedLookupCache();
+  ~SharedLookupCache();
+
+  // Appends Block {Address} to CodePages [Start, Start + Length)
+  // Returns true if new pages are marked as containing code
+  // TODO: May need to be thread-specific after all
+  // bool AddBlockExecutableRange(uint64_t Address, uint64_t Start, uint64_t Length) {
+  //   bool rv = false;
+
+  //   for (auto CurrentPage = Start >> 12, EndPage = (Start + Length - 1) >> 12; CurrentPage <= EndPage; CurrentPage++) {
+  //     auto& CodePage = CodePages[CurrentPage];
+  //     rv |= CodePage.empty();
+  //     CodePage.push_back(Address);
+  //   }
+
+  //   return rv;
+  // }
+
+  // Adds to Guest -> Host code mapping
+  void AddBlockMapping(uint64_t Address, void* HostCode) {
+    [[maybe_unused]]
+    auto Inserted = BlockList.emplace(Address, (uintptr_t)HostCode).second;
+    // NOTE: If this was inserted twice, we've probably raced against another thread to compile this block. Just ignore this one
+    // TODO: Should reset CodeBuffer cursor in that case...
+
+    // TODO: Should this fail?
+    // LOGMAN_THROW_A_FMT(Inserted, "Duplicate block mapping added");
+  }
+
+  std::optional<uintptr_t> FindBlock(uint64_t Address) {
+    auto HostCode = BlockList.find(Address);
+    if (HostCode == BlockList.end()) {
+      return std::nullopt;
+    }
+    return HostCode->second;
+  }
+
+  void Erase(FEXCore::Core::CpuStateFrame* Frame, uint64_t Address) {
+    // Sever any links to this block
+    auto lower = BlockLinks->lower_bound({Address, nullptr});
+    auto upper = BlockLinks->upper_bound({Address, reinterpret_cast<FEXCore::Context::ExitFunctionLinkData*>(UINTPTR_MAX)});
+    for (auto it = lower; it != upper; it = BlockLinks->erase(it)) {
+      // TODO: Is it okay that this will run only once shared cache?
+      it->second(Frame, it->first.HostLink);
+    }
+
+    // Remove from BlockList
+    BlockList.erase(Address);
+  }
+
+  void AddBlockLink(uint64_t GuestDestination, FEXCore::Context::ExitFunctionLinkData* HostLink, const FEXCore::Context::BlockDelinkerFunc& delinker) {
+    BlockLinks->insert({{GuestDestination, HostLink}, delinker});
+  }
+
+  void ClearCache();
+};
+
 class LookupCache {
 public:
   struct LookupCacheEntry {
@@ -56,16 +145,18 @@ public:
     }
 
     // Try L3
-    auto HostCode = BlockList.find(Address);
-
-    if (HostCode != BlockList.end()) {
-      CacheBlockMapping(Address, HostCode->second);
-      return HostCode->second;
+    auto HostCode = Shared->FindBlock(Address);
+    if (HostCode) {
+      CacheBlockMapping(Address, HostCode.value());
+      return HostCode.value();
     }
 
     // Failed to find
     return 0;
   }
+
+  // TODO: Consider making this std::atomic
+  SharedLookupCache* Shared = nullptr;
 
   fextl::map<uint64_t, fextl::vector<uint64_t>> CodePages;
 
@@ -78,7 +169,7 @@ public:
 
     for (auto CurrentPage = Start >> 12, EndPage = (Start + Length - 1) >> 12; CurrentPage <= EndPage; CurrentPage++) {
       auto& CodePage = CodePages[CurrentPage];
-      rv |= CodePage.size() == 0;
+      rv |= CodePage.empty();
       CodePage.push_back(Address);
     }
 
@@ -89,8 +180,7 @@ public:
   void AddBlockMapping(uint64_t Address, void* HostCode) {
     std::lock_guard<std::recursive_mutex> lk(WriteLock);
 
-    [[maybe_unused]] auto Inserted = BlockList.emplace(Address, (uintptr_t)HostCode).second;
-    LOGMAN_THROW_A_FMT(Inserted, "Duplicate block mapping added");
+    Shared->AddBlockMapping(Address, HostCode);
 
     // There is no need to update L1 or L2, they will get updated on first lookup
     // However, adding to L1 here increases performance
@@ -103,15 +193,9 @@ public:
 
     std::lock_guard<std::recursive_mutex> lk(WriteLock);
 
-    // Sever any links to this block
-    auto lower = BlockLinks->lower_bound({Address, nullptr});
-    auto upper = BlockLinks->upper_bound({Address, reinterpret_cast<FEXCore::Context::ExitFunctionLinkData*>(UINTPTR_MAX)});
-    for (auto it = lower; it != upper; it = BlockLinks->erase(it)) {
-      it->second(Frame, it->first.HostLink);
-    }
+    // TODO: Is there a hard requirement for L1 to be erased *after* BlockLinks but *before* PagePointer?
 
-    // Remove from BlockList
-    BlockList.erase(Address);
+    Shared->Erase(Frame, Address);
 
     // Do L1
     auto& L1Entry = reinterpret_cast<LookupCacheEntry*>(L1Pointer)[Address & L1_ENTRIES_MASK];
@@ -143,11 +227,12 @@ public:
   void AddBlockLink(uint64_t GuestDestination, FEXCore::Context::ExitFunctionLinkData* HostLink, const FEXCore::Context::BlockDelinkerFunc& delinker) {
     std::lock_guard<std::recursive_mutex> lk(WriteLock);
 
-    BlockLinks->insert({{GuestDestination, HostLink}, delinker});
+    Shared->AddBlockLink(GuestDestination, HostLink, delinker);
   }
 
   void ClearCache();
   void ClearL2Cache();
+  void ClearThreadLocalCaches();
 
   uintptr_t GetL1Pointer() const {
     return L1Pointer;
@@ -169,7 +254,9 @@ public:
   // Some care is taken so that L1 lookups can be done without locks, and even tearing is unlikely to lead to a crash.
   // This approach has not been fully vetted yet.
   // Also note that L1 lookups might be inlined in the JIT Dispatcher and/or block ends.
-  std::recursive_mutex WriteLock;
+  // TODO: Split into separate mutexes for SharedLookupCache and L1+L2 caches
+  // std::recursive_mutex& WriteLock = Shared->WriteLock;
+  std::reference_wrapper<std::recursive_mutex> WriteLock = Shared->WriteLock;
 
 private:
   void CacheBlockMapping(uint64_t Address, uintptr_t HostCode) {
@@ -225,34 +312,6 @@ private:
   uintptr_t PagePointer;
   uintptr_t PageMemory;
   uintptr_t L1Pointer;
-
-  struct BlockLinkTag {
-    uint64_t GuestDestination;
-    FEXCore::Context::ExitFunctionLinkData* HostLink;
-
-    bool operator<(const BlockLinkTag& other) const {
-      if (GuestDestination < other.GuestDestination) {
-        return true;
-      } else if (GuestDestination == other.GuestDestination) {
-        return HostLink < other.HostLink;
-      } else {
-        return false;
-      }
-    }
-  };
-
-  // Use a monotonic buffer resource to allocate both the std::pmr::map and its members.
-  // This allows us to quickly clear the block link map by clearing the monotonic allocator.
-  // If we had allocated the block link map without the MBR, then clearing the map would require slowly
-  // walking each block member and destructing objects.
-  //
-  // This makes `BlockLinks` look like a raw pointer that could memory leak, but since it is backed by the MBR, it won't.
-  std::pmr::monotonic_buffer_resource BlockLinks_mbr;
-  using BlockLinksMapType = std::pmr::map<BlockLinkTag, FEXCore::Context::BlockDelinkerFunc>;
-  fextl::unique_ptr<std::pmr::polymorphic_allocator<std::byte>> BlockLinks_pma;
-  BlockLinksMapType* BlockLinks;
-
-  fextl::robin_map<uint64_t, uint64_t> BlockList;
 
   size_t TotalCacheSize;
 
