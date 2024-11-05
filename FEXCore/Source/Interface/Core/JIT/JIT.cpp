@@ -535,7 +535,7 @@ static uint64_t Arm64JITCore_ExitFunctionLink(FEXCore::Core::CpuStateFrame* Fram
 void Arm64JITCore::Op_NoOp(const IR::IROp_Header* IROp, IR::NodeID Node) {}
 
 Arm64JITCore::Arm64JITCore(FEXCore::Context::ContextImpl* ctx, FEXCore::Core::InternalThreadState* Thread)
-  : CPUBackend(*ctx, Thread, INITIAL_CODE_SIZE, MAX_CODE_SIZE)
+  : CPUBackend(Thread, INITIAL_CODE_SIZE, MAX_CODE_SIZE)
   , Arm64Emitter(ctx)
   , HostSupportsSVE128 {ctx->HostFeatures.SupportsSVE128}
   , HostSupportsSVE256 {ctx->HostFeatures.SupportsSVE256}
