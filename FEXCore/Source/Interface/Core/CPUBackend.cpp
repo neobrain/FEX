@@ -266,10 +266,11 @@ namespace CPU {
     return TotalLUT;
   }()};
 
-  CPUBackend::CPUBackend(FEXCore::Core::InternalThreadState* ThreadState, size_t InitialCodeSize, size_t MaxCodeSize)
+  CPUBackend::CPUBackend(CodeBufferManager& manager, FEXCore::Core::InternalThreadState* ThreadState, size_t InitialCodeSize, size_t MaxCodeSize)
     : ThreadState(ThreadState)
     , InitialCodeSize(InitialCodeSize)
-    , MaxCodeSize(MaxCodeSize) {
+    , MaxCodeSize(MaxCodeSize)
+    , manager(manager) {
 
     auto& Common = ThreadState->CurrentFrame->Pointers.Common;
 
@@ -308,7 +309,7 @@ namespace CPU {
 
   CPUBackend::~CPUBackend() {
     for (auto CodeBuffer : CodeBuffers) {
-      FreeCodeBuffer(CodeBuffer);
+      manager.ReleaseCodeBuffer(CodeBuffer);
     }
     CodeBuffers.clear();
   }
@@ -316,14 +317,14 @@ namespace CPU {
   auto CPUBackend::GetEmptyCodeBuffer() -> CodeBuffer* {
     if (ThreadState->CurrentFrame->SignalHandlerRefCounter == 0) {
       if (CodeBuffers.empty()) {
-        auto NewCodeBuffer = AllocateNewCodeBuffer(InitialCodeSize);
+        auto NewCodeBuffer = manager.AllocateNewCodeBuffer(InitialCodeSize);
         EmplaceNewCodeBuffer(NewCodeBuffer);
       } else {
         if (CodeBuffers.size() > 1) {
           // If we have more than one code buffer we are tracking then walk them and delete
           // This is a cleanup step
           for (size_t i = 1; i < CodeBuffers.size(); i++) {
-            FreeCodeBuffer(CodeBuffers[i]);
+            manager.ReleaseCodeBuffer(CodeBuffers[i]);
           }
           CodeBuffers.resize(1);
         }
@@ -331,27 +332,27 @@ namespace CPU {
         CurrentCodeBuffer = &CodeBuffers[0];
 
         if (CurrentCodeBuffer->Size != MaxCodeSize) {
-          FreeCodeBuffer(*CurrentCodeBuffer);
+          manager.ReleaseCodeBuffer(*CurrentCodeBuffer);
 
           // Resize the code buffer and reallocate our code size
           CurrentCodeBuffer->Size *= 1.5;
           CurrentCodeBuffer->Size = std::min(CurrentCodeBuffer->Size, MaxCodeSize);
 
-          *CurrentCodeBuffer = AllocateNewCodeBuffer(CurrentCodeBuffer->Size);
+          *CurrentCodeBuffer = manager.AllocateNewCodeBuffer(CurrentCodeBuffer->Size);
         }
       }
     } else {
       // We have signal handlers that have generated code
       // This means that we can not safely clear the code at this point in time
       // Allocate some new code buffers that we can switch over to instead
-      auto NewCodeBuffer = AllocateNewCodeBuffer(InitialCodeSize);
+      auto NewCodeBuffer = manager.AllocateNewCodeBuffer(InitialCodeSize);
       EmplaceNewCodeBuffer(NewCodeBuffer);
     }
 
     return CurrentCodeBuffer;
   }
 
-  auto CPUBackend::AllocateNewCodeBuffer(size_t Size) -> CodeBuffer {
+  auto CodeBufferManager::AllocateNewCodeBuffer(size_t Size) -> CodeBuffer {
 #ifndef _WIN32
 // MDWE (Memory-Deny-Write-Execute) is a new Linux 6.3 feature.
 // It's equivalent to systemd's `MemoryDenyWriteExecute` but implemented entirely in the kernel.
@@ -382,17 +383,22 @@ namespace CPU {
     Buffer.Ptr = static_cast<uint8_t*>(FEXCore::Allocator::VirtualAlloc(Buffer.Size, true));
     LOGMAN_THROW_AA_FMT(!!Buffer.Ptr, "Couldn't allocate code buffer");
 
-    if (static_cast<Context::ContextImpl*>(ThreadState->CTX)->Config.GlobalJITNaming()) {
-      static_cast<Context::ContextImpl*>(ThreadState->CTX)->Symbols.RegisterJITSpace(Buffer.Ptr, Buffer.Size);
-    }
+    // TODO: Re-enable
+    // if (static_cast<Context::ContextImpl*>(ThreadState->CTX)->Config.GlobalJITNaming()) {
+    //   static_cast<Context::ContextImpl*>(ThreadState->CTX)->Symbols.RegisterJITSpace(Buffer.Ptr, Buffer.Size);
+    // }
     return Buffer;
   }
 
-  void CPUBackend::FreeCodeBuffer(CodeBuffer Buffer) {
-    FEXCore::Allocator::VirtualFree(Buffer.Ptr, Buffer.Size);
+  void CodeBufferManager::ReleaseCodeBuffer(CodeBuffer Buffer) {
+    // TODO: Free memory at some other point!!
+    // FEXCore::Allocator::VirtualFree(Buffer.Ptr, Buffer.Size);
   }
 
   bool CPUBackend::IsAddressInCodeBuffer(uintptr_t Address) const {
+    return manager.IsAddressInCodeBuffer(Address);
+  }
+  bool CodeBufferManager::IsAddressInCodeBuffer(uintptr_t Address) const {
     for (auto& Buffer : CodeBuffers) {
       auto start = (uintptr_t)Buffer.Ptr;
       auto end = start + Buffer.Size;

@@ -38,18 +38,33 @@ namespace CodeSerialize {
 }
 
 namespace CPU {
+  struct CodeBuffer {
+    uint8_t* Ptr;
+    size_t Size;
+  };
+
+  class CodeBufferManager {
+  public:
+    static CodeBuffer AllocateNewCodeBuffer(size_t Size);
+    void EmplaceNewCodeBuffer(CodeBuffer Buffer) {
+      CodeBuffers.emplace_back(Buffer);
+    }
+
+    void ReleaseCodeBuffer(CodeBuffer Buffer);
+
+    bool IsAddressInCodeBuffer(uintptr_t Address) const;
+
+    fextl::vector<CodeBuffer> CodeBuffers {};
+  };
+
   class CPUBackend {
   public:
-    struct CodeBuffer {
-      uint8_t* Ptr;
-      size_t Size;
-    };
 
     /**
      * @param InitialCodeSize - Initial size for the code buffers
      * @param MaxCodeSize - Max size for the code buffers
      */
-    CPUBackend(FEXCore::Core::InternalThreadState* ThreadState, size_t InitialCodeSize, size_t MaxCodeSize);
+    CPUBackend(CodeBufferManager&, FEXCore::Core::InternalThreadState*, size_t InitialCodeSize, size_t MaxCodeSize);
 
     virtual ~CPUBackend();
 
@@ -150,6 +165,7 @@ namespace CPU {
      */
     virtual void ClearRelocations() {}
 
+    // TODO: Remove. Just a wrapper around CodeBufferManager now
     bool IsAddressInCodeBuffer(uintptr_t Address) const;
 
   protected:
@@ -164,13 +180,14 @@ namespace CPU {
     CodeBuffer* GetEmptyCodeBuffer();
 
     // This is the current code buffer that we are tracking
+    // TODO: Drop in favor of a plain uint32_t to track the current code buffer *size*
     CodeBuffer* CurrentCodeBuffer {};
 
-  private:
-    CodeBuffer AllocateNewCodeBuffer(size_t Size);
-    void FreeCodeBuffer(CodeBuffer Buffer);
+    CodeBufferManager& manager; // TODO: Rename
 
+  private:
     void EmplaceNewCodeBuffer(CodeBuffer Buffer) {
+      manager.EmplaceNewCodeBuffer(Buffer);
       CurrentCodeBuffer = &CodeBuffers.emplace_back(Buffer);
     }
 
