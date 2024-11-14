@@ -408,6 +408,7 @@ bool SignalDelegator::HandleSIGILL(FEXCore::Core::InternalThreadState* Thread, i
     // Ref count our faults
     // We use this to track if it is safe to clear cache
     --Thread->CurrentFrame->SignalHandlerRefCounter;
+    // TODO: If zero, clear CodeBuffer refs?
 
     if (ThreadObject->SignalInfo.DeferredSignalFrames.size() != 0) {
       // If we have more deferred frames to process then mprotect back to PROT_NONE.
@@ -424,6 +425,7 @@ bool SignalDelegator::HandleSIGILL(FEXCore::Core::InternalThreadState* Thread, i
     // Ref count our faults
     // We use this to track if it is safe to clear cache
     --Thread->CurrentFrame->SignalHandlerRefCounter;
+    // TODO: If zero, clear CodeBuffer refs?
     return true;
   }
 
@@ -468,6 +470,7 @@ bool SignalDelegator::HandleSignalPause(FEXCore::Core::InternalThreadState* Thre
 
     // Our ref counting doesn't matter anymore
     Thread->CurrentFrame->SignalHandlerRefCounter = 0;
+    // TODO: Clear CodeBuffer refs?
 
     // Set the new PC
     if (CTX->IsAddressInCodeBuffer(Thread, ArchHelpers::Context::GetPc(ucontext))) {
@@ -499,6 +502,7 @@ bool SignalDelegator::HandleSignalPause(FEXCore::Core::InternalThreadState* Thre
     // Ref count our faults
     // We use this to track if it is safe to clear cache
     --Thread->CurrentFrame->SignalHandlerRefCounter;
+    // TODO: If zero, clear CodeBuffer refs?
 
     ThreadObject->SignalReason.store(SignalEvent::Nothing);
     return true;

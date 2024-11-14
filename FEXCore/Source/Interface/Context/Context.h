@@ -164,7 +164,7 @@ public:
     IRCaptureCache.WriteFilesWithCode(Writer);
   }
 
-  void ClearCodeCache(FEXCore::Core::InternalThreadState* Thread) override;
+  void ClearCodeCache(FEXCore::Core::InternalThreadState* Thread, bool NewCodeBuffer = true) override;
   void InvalidateGuestCodeRange(FEXCore::Core::InternalThreadState* Thread, uint64_t Start, uint64_t Length) override;
   void InvalidateGuestCodeRange(FEXCore::Core::InternalThreadState* Thread, uint64_t Start, uint64_t Length, CodeRangeInvalidationFn callback) override;
   FEXCore::ForkableSharedMutex& GetCodeInvalidationMutex() override {
