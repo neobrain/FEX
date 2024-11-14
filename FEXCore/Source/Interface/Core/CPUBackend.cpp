@@ -266,11 +266,10 @@ namespace CPU {
     return TotalLUT;
   }()};
 
-  CPUBackend::CPUBackend(CodeBufferManager& manager, FEXCore::Core::InternalThreadState* ThreadState, size_t InitialCodeSize, size_t MaxCodeSize)
+  CPUBackend::CPUBackend(FEXCore::Core::InternalThreadState* ThreadState, size_t InitialCodeSize, size_t MaxCodeSize)
     : ThreadState(ThreadState)
     , InitialCodeSize(InitialCodeSize)
-    , MaxCodeSize(MaxCodeSize)
-    , manager(manager) {
+    , MaxCodeSize(MaxCodeSize) {
 
     auto& Common = ThreadState->CurrentFrame->Pointers.Common;
 
@@ -307,68 +306,52 @@ namespace CPU {
 #endif
   }
 
-
-  CPUBackend::~CPUBackend() = default;
+  CPUBackend::~CPUBackend() {
+    for (auto CodeBuffer : CodeBuffers) {
+      FreeCodeBuffer(CodeBuffer);
+    }
+    CodeBuffers.clear();
+  }
 
   auto CPUBackend::GetEmptyCodeBuffer() -> CodeBuffer* {
-    auto PrevCodeBuffer = CurrentCodeBuffer;
+    if (ThreadState->CurrentFrame->SignalHandlerRefCounter == 0) {
+      if (CodeBuffers.empty()) {
+        auto NewCodeBuffer = AllocateNewCodeBuffer(InitialCodeSize);
+        EmplaceNewCodeBuffer(NewCodeBuffer);
+      } else {
+        if (CodeBuffers.size() > 1) {
+          // If we have more than one code buffer we are tracking then walk them and delete
+          // This is a cleanup step
+          for (size_t i = 1; i < CodeBuffers.size(); i++) {
+            FreeCodeBuffer(CodeBuffers[i]);
+          }
+          CodeBuffers.resize(1);
+        }
+        // Set the current code buffer to the initial
+        CurrentCodeBuffer = &CodeBuffers[0];
 
-    // Resize the code buffer and reallocate our code size
-    // TODO: Reconsider whether we should apply a maximum here
-    // TODO: Handle the CodeBuffers.empty() case more cleanly
-    if (manager.CodeBuffers.empty()) {
-      // Allocate initial CodeBuffer and return it
-      CurrentCodeBuffer = manager.GetCurrentCodeBuffer();
-    } else {
-      TracyMessageL("Extending CodeBuffer");
-      auto CurBuffer = manager.GetCurrentCodeBuffer();
-      auto NewCodeBufferSize = std::min<size_t>(CurBuffer->Size * 1.5, MaxCodeSize);
-      CurrentCodeBuffer = manager.AllocateNewCodeBuffer(NewCodeBufferSize);
-    }
+        if (CurrentCodeBuffer->Size != MaxCodeSize) {
+          FreeCodeBuffer(*CurrentCodeBuffer);
 
-    if (ThreadState->CurrentFrame->SignalHandlerRefCounter != 0) {
-      // We have signal handlers that have generated code
-      // This means that we can not safely clear the code at this point in time
-      // Keep a reference to the old code buffer to delay deallocation
-      // TODO: Clear SignalHandlerCodeBuffers once SignalHandlerRefCounter reaches 0 again
-      SignalHandlerCodeBuffers.push_back(PrevCodeBuffer);
-    } else {
-      SignalHandlerCodeBuffers.clear();
-    }
+          // Resize the code buffer and reallocate our code size
+          CurrentCodeBuffer->Size *= 1.5;
+          CurrentCodeBuffer->Size = std::min(CurrentCodeBuffer->Size, MaxCodeSize);
 
-    return CurrentCodeBuffer.get();
-  }
-
-  bool CPUBackend::CheckCodeBufferUpdate() {
-    auto NewCodeBuffer = manager.GetCurrentCodeBuffer();
-    if (CurrentCodeBuffer != NewCodeBuffer) {
-      TracyMessageL("Updating CodeBuffer");
-      fmt::print(stderr, "Moving to new CodeBuffer generation in thread {}\n", ::gettid());
-      CurrentCodeBuffer = NewCodeBuffer;
-      // TODO: Release code buffer if count is zero...
-      // TODO: Associate each CodeBuffer with a LookupCache template?
-      for (auto CodeBufferIt = manager.CodeBuffers.begin(); CodeBufferIt != manager.CodeBuffers.end();) {
-        if (CodeBufferIt->expired()) {
-          CodeBufferIt = manager.CodeBuffers.erase(CodeBufferIt);
-          TracyPlot("CodeBufferCount", static_cast<int64_t>(manager.CodeBuffers.size()));
-        } else {
-          ++CodeBufferIt;
+          *CurrentCodeBuffer = AllocateNewCodeBuffer(CurrentCodeBuffer->Size);
         }
       }
-      fmt::print(stderr, "... now have {} buffers in total\n", manager.CodeBuffers.size());
-      return true;
+    } else {
+      // We have signal handlers that have generated code
+      // This means that we can not safely clear the code at this point in time
+      // Allocate some new code buffers that we can switch over to instead
+      auto NewCodeBuffer = AllocateNewCodeBuffer(InitialCodeSize);
+      EmplaceNewCodeBuffer(NewCodeBuffer);
     }
-    return false;
+
+    return CurrentCodeBuffer;
   }
 
-  CodeBuffer::~CodeBuffer() {
-    TracyPlot("CodeBufferSize", static_cast<int64_t>(TotalCodeBufferSize -= Size));
-    FEXCore::Allocator::VirtualFree(Ptr, Size);
-  }
-
-  auto CodeBufferManager::AllocateNewCodeBuffer(size_t Size) -> fextl::shared_ptr<CodeBuffer> {
-    TracyPlot("CodeBufferSize", static_cast<int64_t>(TotalCodeBufferSize += Size));
-
+  auto CPUBackend::AllocateNewCodeBuffer(size_t Size) -> CodeBuffer {
 #ifndef _WIN32
 // MDWE (Memory-Deny-Write-Execute) is a new Linux 6.3 feature.
 // It's equivalent to systemd's `MemoryDenyWriteExecute` but implemented entirely in the kernel.
@@ -394,56 +377,25 @@ namespace CPU {
     }
 #endif
 
-    auto Buffer = fextl::make_shared<CodeBuffer>();
-    Buffer->Size = Size;
-    Buffer->Ptr = static_cast<uint8_t*>(FEXCore::Allocator::VirtualAlloc(Buffer->Size, true));
-    LOGMAN_THROW_A_FMT(!!Buffer->Ptr, "Couldn't allocate code buffer");
+    CodeBuffer Buffer;
+    Buffer.Size = Size;
+    Buffer.Ptr = static_cast<uint8_t*>(FEXCore::Allocator::VirtualAlloc(Buffer.Size, true));
+    LOGMAN_THROW_AA_FMT(!!Buffer.Ptr, "Couldn't allocate code buffer");
 
-    // TODO: Re-enable
-    // if (static_cast<Context::ContextImpl*>(ThreadState->CTX)->Config.GlobalJITNaming()) {
-    //   static_cast<Context::ContextImpl*>(ThreadState->CTX)->Symbols.RegisterJITSpace(Buffer.Ptr, Buffer.Size);
-    // }
-
-    CodeBuffers.push_back(Buffer);
-    Latest = Buffer;
-    LatestOffset = 0;
-
-    for (auto CodeBufferIt = CodeBuffers.begin(); CodeBufferIt != CodeBuffers.end();) {
-      if (CodeBufferIt->expired()) {
-        CodeBufferIt = CodeBuffers.erase(CodeBufferIt);
-        TracyPlot("CodeBufferCount", static_cast<int64_t>(CodeBuffers.size()));
-      } else {
-        ++CodeBufferIt;
-      }
+    if (static_cast<Context::ContextImpl*>(ThreadState->CTX)->Config.GlobalJITNaming()) {
+      static_cast<Context::ContextImpl*>(ThreadState->CTX)->Symbols.RegisterJITSpace(Buffer.Ptr, Buffer.Size);
     }
-    TracyPlot("CodeBufferCount", static_cast<int64_t>(CodeBuffers.size()));
-
-    fprintf(stderr, "ALLOCATED CODEBUFFER OF SIZE %#x, now at %d in total\n", (int)Size, (int)CodeBuffers.size());
     return Buffer;
   }
 
-  fextl::shared_ptr<CodeBuffer> CodeBufferManager::GetCurrentCodeBuffer() {
-    if (!Latest) {
-      TracyMessageL("Creating first CodeBuffer");
-      Latest = AllocateNewCodeBuffer(1024 * 1024 * /*128*/ 16); // TODO: Use InitialCodeSize instead
-      LatestOffset = 0;
-    }
-    return Latest;
+  void CPUBackend::FreeCodeBuffer(CodeBuffer Buffer) {
+    FEXCore::Allocator::VirtualFree(Buffer.Ptr, Buffer.Size);
   }
 
   bool CPUBackend::IsAddressInCodeBuffer(uintptr_t Address) const {
-    return manager.IsAddressInCodeBuffer(Address);
-  }
-  bool CodeBufferManager::IsAddressInCodeBuffer(uintptr_t Address) const {
-    for (auto& BufferWeak : CodeBuffers) {
-      auto Buffer = BufferWeak.lock();
-      if (!Buffer) {
-        // TODO: Remove Buffer from CodeBuffers
-        continue;
-      }
-
-      auto start = (uintptr_t)Buffer->Ptr;
-      auto end = start + Buffer->Size;
+    for (auto& Buffer : CodeBuffers) {
+      auto start = (uintptr_t)Buffer.Ptr;
+      auto end = start + Buffer.Size;
 
       if (Address >= start && Address < end) {
         return true;
