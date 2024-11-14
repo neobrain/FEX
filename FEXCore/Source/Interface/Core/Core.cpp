@@ -827,9 +827,10 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
   auto lk = GuardSignalDeferringSection<std::shared_lock>(CodeInvalidationMutex, Thread);
 
   // TODO: I guess this should be done in guest syscalls, too?
-  if (Thread->CPUBackend->CheckCodeBufferUpdate()) {
-    ClearCodeCache(Thread, false);
-  }
+  // TODO: Should acquire mutex...
+  // if (Thread->CPUBackend->CheckCodeBufferUpdate()) {
+  //   ClearCodeCache(Thread, false);
+  // }
 
   // Is the code in the cache?
   // The backends only check L1 and L2, not L3

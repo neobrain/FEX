@@ -307,39 +307,10 @@ namespace CPU {
 #endif
   }
 
-  CPUBackend::~CPUBackend() {
-    if (CurrentCodeBuffer.use_count() == 1) {
-      manager.ReleaseCodeBuffer(*CurrentCodeBuffer);
-    }
-    CurrentCodeBuffer.reset();
-
-    for (auto& CodeBuffer : SignalHandlerCodeBuffers) {
-      if (CodeBuffer.use_count() == 1) {
-        manager.ReleaseCodeBuffer(*CodeBuffer);
-      }
-      CodeBuffer.reset();
-    }
-  }
+  CPUBackend::~CPUBackend() = default;
 
   auto CPUBackend::GetEmptyCodeBuffer() -> CodeBuffer* {
     auto PrevCodeBuffer = CurrentCodeBuffer;
-
-    if (ThreadState->CurrentFrame->SignalHandlerRefCounter != 0) {
-      // We have signal handlers that have generated code
-      // This means that we can not safely clear the code at this point in time
-      // Keep a reference to the old code buffer to delay deallocation
-      // TODO: Clear SignalHandlerCodeBuffers once SignalHandlerRefCounter reaches 0 again
-      SignalHandlerCodeBuffers.push_back(CurrentCodeBuffer);
-    } else {
-      // SignalHandlerCodeBuffers.clear();
-      for (auto& CodeBuffer : SignalHandlerCodeBuffers) {
-        if (CodeBuffer.use_count() == 1) {
-          manager.ReleaseCodeBuffer(*CodeBuffer);
-        }
-        CodeBuffer.reset();
-      }
-      SignalHandlerCodeBuffers.clear();
-    }
 
     // Resize the code buffer and reallocate our code size
     // TODO: Reconsider whether we should apply a maximum here
@@ -353,17 +324,24 @@ namespace CPU {
       CurrentCodeBuffer = manager.AllocateNewCodeBuffer(NewCodeBufferSize);
     }
 
-    if (PrevCodeBuffer.use_count() == 1) {
-      manager.ReleaseCodeBuffer(*PrevCodeBuffer);
+    if (ThreadState->CurrentFrame->SignalHandlerRefCounter != 0) {
+      // We have signal handlers that have generated code
+      // This means that we can not safely clear the code at this point in time
+      // Keep a reference to the old code buffer to delay deallocation
+      // TODO: Clear SignalHandlerCodeBuffers once SignalHandlerRefCounter reaches 0 again
+      SignalHandlerCodeBuffers.push_back(PrevCodeBuffer);
+    } else {
+      SignalHandlerCodeBuffers.clear();
     }
 
     return CurrentCodeBuffer.get();
   }
 
   bool CPUBackend::CheckCodeBufferUpdate() {
-    if (CurrentCodeBuffer != manager.GetCurrentCodeBuffer()) {
+    auto NewCodeBuffer = manager.GetCurrentCodeBuffer();
+    if (CurrentCodeBuffer != NewCodeBuffer) {
       fmt::print(stderr, "Moving to new CodeBuffer generation in thread {}\n", ::gettid());
-      CurrentCodeBuffer = manager.GetCurrentCodeBuffer();
+      CurrentCodeBuffer = NewCodeBuffer;
       // TODO: Release code buffer if count is zero...
       // TODO: Associate each CodeBuffer with a LookupCache template?
       for (auto CodeBufferIt = manager.CodeBuffers.begin(); CodeBufferIt != manager.CodeBuffers.end();) {
@@ -377,6 +355,10 @@ namespace CPU {
       return true;
     }
     return false;
+  }
+
+  CodeBuffer::~CodeBuffer() {
+    FEXCore::Allocator::VirtualFree(Ptr, Size);
   }
 
   auto CodeBufferManager::AllocateNewCodeBuffer(size_t Size) -> fextl::shared_ptr<CodeBuffer> {
@@ -437,11 +419,6 @@ namespace CPU {
       LatestOffset = 0;
     }
     return Latest;
-  }
-
-  void CodeBufferManager::ReleaseCodeBuffer(CodeBuffer Buffer) {
-    // TODO: Free memory at some other point!!
-    FEXCore::Allocator::VirtualFree(Buffer.Ptr, Buffer.Size);
   }
 
   bool CPUBackend::IsAddressInCodeBuffer(uintptr_t Address) const {
