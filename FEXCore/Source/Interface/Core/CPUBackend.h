@@ -9,6 +9,7 @@ $end_info$
 #pragma once
 
 #include <FEXCore/Utils/CompilerDefs.h>
+#include <FEXCore/fextl/memory.h>
 #include <FEXCore/fextl/string.h>
 #include <FEXCore/fextl/vector.h>
 
@@ -41,20 +42,28 @@ namespace CPU {
   struct CodeBuffer {
     uint8_t* Ptr;
     size_t Size;
+    std::shared_ptr<CodeBuffer> next;
+
+    ~CodeBuffer();
+
+    // The combination of nullptr + 0x1234 bytes is reserved as a tag other CodeBuffers can point "next" to in order to indicate the referencing CodeBuffer was invalidated
+    bool IsInvalidTag() const {
+      return !Ptr && Size == 0x1234;
+    }
   };
 
   class CodeBufferManager {
   public:
-    static CodeBuffer AllocateNewCodeBuffer(size_t Size);
-    void EmplaceNewCodeBuffer(CodeBuffer Buffer) {
-      CodeBuffers.emplace_back(Buffer);
-    }
+    fextl::shared_ptr<CodeBuffer> AllocateNewCodeBuffer(size_t Size);
 
-    void ReleaseCodeBuffer(CodeBuffer Buffer);
+    // TODO: Not really needed... we only need this to query the growing CodeBuffer size
+    std::shared_ptr<CodeBuffer> GetCurrentCodeBuffer();
 
     bool IsAddressInCodeBuffer(uintptr_t Address) const;
 
-    fextl::vector<CodeBuffer> CodeBuffers {};
+    fextl::vector<std::weak_ptr<CodeBuffer>> CodeBuffers;
+    std::shared_ptr<CodeBuffer> Latest;
+    std::size_t LatestOffset;
   };
 
   class CPUBackend {
@@ -168,6 +177,9 @@ namespace CPU {
     // TODO: Remove. Just a wrapper around CodeBufferManager now
     bool IsAddressInCodeBuffer(uintptr_t Address) const;
 
+    // Returns true if the CodeBuffer changed
+    bool CheckCodeBufferUpdate();
+
   protected:
     // Max spill slot size in bytes. We need at most 32 bytes
     // to be able to handle a 256-bit vector store to a slot.
@@ -181,19 +193,15 @@ namespace CPU {
 
     // This is the current code buffer that we are tracking
     // TODO: Drop in favor of a plain uint32_t to track the current code buffer *size*
-    CodeBuffer* CurrentCodeBuffer {};
+    // CodeBuffer* CurrentCodeBuffer {};
+    std::shared_ptr<CodeBuffer> CurrentCodeBuffer;
+
+    // Old CodeBuffer generations required to be valid until returning from signal handlers
+    fextl::vector<std::shared_ptr<CodeBuffer>> SignalHandlerCodeBuffers;
 
     CodeBufferManager& manager; // TODO: Rename
 
   private:
-    void EmplaceNewCodeBuffer(CodeBuffer Buffer) {
-      manager.EmplaceNewCodeBuffer(Buffer);
-      CurrentCodeBuffer = &CodeBuffers.emplace_back(Buffer);
-    }
-
-    // This is the array of code buffers. Unless signals force us to keep more than
-    // buffer, there will be only one entry here
-    fextl::vector<CodeBuffer> CodeBuffers {};
   };
 
 } // namespace CPU
