@@ -44,8 +44,6 @@ namespace CPU {
     size_t Size;
     std::shared_ptr<CodeBuffer> next;
 
-    ~CodeBuffer();
-
     // The combination of nullptr + 0x1234 bytes is reserved as a tag other CodeBuffers can point "next" to in order to indicate the referencing CodeBuffer was invalidated
     bool IsInvalidTag() const {
       return !Ptr && Size == 0x1234;
@@ -58,6 +56,8 @@ namespace CPU {
 
     // TODO: Not really needed... we only need this to query the growing CodeBuffer size
     std::shared_ptr<CodeBuffer> GetCurrentCodeBuffer();
+
+    static void ReleaseCodeBuffer(CodeBuffer Buffer);
 
     bool IsAddressInCodeBuffer(uintptr_t Address) const;
 
