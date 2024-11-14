@@ -169,7 +169,7 @@ public:
   FEX_DEFAULT_VISIBILITY virtual void FinalizeAOTIRCache() = 0;
   FEX_DEFAULT_VISIBILITY virtual void WriteFilesWithCode(AOTIRCodeFileWriterFn Writer) = 0;
 
-  FEX_DEFAULT_VISIBILITY virtual void ClearCodeCache(FEXCore::Core::InternalThreadState* Thread, bool NewCodeBuffer = true) = 0;
+  FEX_DEFAULT_VISIBILITY virtual void ClearCodeCache(FEXCore::Core::InternalThreadState* Thread) = 0;
   FEX_DEFAULT_VISIBILITY virtual void InvalidateGuestCodeRange(FEXCore::Core::InternalThreadState* Thread, uint64_t Start, uint64_t Length) = 0;
   FEX_DEFAULT_VISIBILITY virtual void InvalidateGuestCodeRange(FEXCore::Core::InternalThreadState* Thread, uint64_t Start, uint64_t Length,
                                                                CodeRangeInvalidationFn callback) = 0;

@@ -475,7 +475,7 @@ void ContextImpl::AddBlockMapping(FEXCore::Core::InternalThreadState* Thread, ui
   Thread->LookupCache->AddBlockMapping(Address, Ptr);
 }
 
-void ContextImpl::ClearCodeCache(FEXCore::Core::InternalThreadState* Thread, bool NewCodeBuffer) {
+void ContextImpl::ClearCodeCache(FEXCore::Core::InternalThreadState* Thread) {
   FEXCORE_PROFILE_INSTANT("ClearCodeCache");
 
   if (CodeObjectCacheService) {
@@ -486,9 +486,7 @@ void ContextImpl::ClearCodeCache(FEXCore::Core::InternalThreadState* Thread, boo
   std::lock_guard<std::recursive_mutex> lk(Thread->LookupCache->WriteLock);
 
   Thread->LookupCache->ClearCache();
-  if (NewCodeBuffer) {
-    Thread->CPUBackend->ClearCache();
-  }
+  Thread->CPUBackend->ClearCache();
 }
 
 static void IRDumper(FEXCore::Core::InternalThreadState* Thread, IR::IREmitter* IREmitter, uint64_t GuestRIP, IR::RegisterAllocationData* RA) {
@@ -825,12 +823,6 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
 
   // Invalidate might take a unique lock on this, to guarantee that during invalidation no code gets compiled
   auto lk = GuardSignalDeferringSection<std::shared_lock>(CodeInvalidationMutex, Thread);
-
-  // TODO: I guess this should be done in guest syscalls, too?
-  // TODO: Should acquire mutex...
-  // if (Thread->CPUBackend->CheckCodeBufferUpdate()) {
-  //   ClearCodeCache(Thread, false);
-  // }
 
   // Is the code in the cache?
   // The backends only check L1 and L2, not L3

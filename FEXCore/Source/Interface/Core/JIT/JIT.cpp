@@ -38,10 +38,9 @@ $end_info$
 #include <string.h>
 #include <limits>
 
-static constexpr size_t INITIAL_CODE_SIZE = 1024 * 1024 * /*128*/ 16;
+static constexpr size_t INITIAL_CODE_SIZE = 1024 * 1024 * 16;
 // We don't want to move above 128MB atm because that means we will have to encode longer jumps
-// static constexpr size_t MAX_CODE_SIZE = 1024 * 1024 * 128;
-static constexpr size_t MAX_CODE_SIZE = 1024 * 1024 * 1280;
+static constexpr size_t MAX_CODE_SIZE = 1024 * 1024 * 128;
 
 namespace {
 static uint64_t LUDIV(uint64_t SrcHigh, uint64_t SrcLow, uint64_t Divisor) {
@@ -671,13 +670,9 @@ bool Arm64JITCore::IsGPR(IR::NodeID Node) const {
   return Class == IR::GPRClass || Class == IR::GPRFixedClass;
 }
 
-std::mutex allthesinglemutexes;
-
 CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, const FEXCore::IR::IRListView* IR, FEXCore::Core::DebugData* DebugData,
                                                    const FEXCore::IR::RegisterAllocationData* RAData) {
   FEXCORE_PROFILE_SCOPED("Arm64::CompileCode");
-
-  std::unique_lock lock(allthesinglemutexes);
 
   JumpTargets.clear();
   uint32_t SSACount = IR->GetSSACount();
@@ -689,34 +684,9 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, const FEXCore
 
   // Fairly excessive buffer range to make sure we don't overflow
   uint32_t BufferRange = SSACount * 16;
-  // fmt::print(stderr, "Moving to CodeBuffer offset {:#x} / {:#x}\n", manager.LatestOffset, CurrentCodeBuffer->Size);
-  SetBuffer(CurrentCodeBuffer->Ptr, CurrentCodeBuffer->Size);
-  SetCursorOffset(manager.LatestOffset);
-  auto makeonexit = []<typename F>(F&& f) {
-    struct OnReturn {
-      F f;
-      ~OnReturn() {
-        std::forward<F>(f)();
-      }
-    };
-    return OnReturn {std::forward<F>(f)};
-  };
-  auto _ = makeonexit([&]() { manager.LatestOffset = GetCursorOffset(); });
-  struct OnReturn {
-    ~OnReturn() {}
-  };
-
   if ((GetCursorOffset() + BufferRange) > CurrentCodeBuffer->Size) {
     CTX->ClearCodeCache(ThreadState);
   }
-
-  if (CheckCodeBufferUpdate()) {
-    CTX->ClearCodeCache(ThreadState, false);
-  }
-
-  // Refetch CodeBuffer in case it changed
-  SetBuffer(CurrentCodeBuffer->Ptr, CurrentCodeBuffer->Size);
-  SetCursorOffset(manager.LatestOffset);
 
   CodeData.BlockBegin = GetCursorAddress<uint8_t*>();
 
