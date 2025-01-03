@@ -13,9 +13,6 @@ std::optional<CapturedHandlerState> from_handler;
 // Number of bytes to skip to resume from the signal handler
 int capturing_handler_skip = 0;
 
-// Number of times the signal handler has caught a signal
-int capturing_handler_calls = 0;
-
 // Signal handler that writes its context data to the global from_handler
 static void CapturingHandler(int signal, siginfo_t* siginfo, void* context) {
   ucontext_t* _context = (ucontext_t*)context;
@@ -27,7 +24,6 @@ static void CapturingHandler(int signal, siginfo_t* siginfo, void* context) {
 #endif
   _context->uc_mcontext.gregs[FEX_IP_REG] += capturing_handler_skip;
 #undef FEX_IP_REG
-  capturing_handler_calls++;
 }
 
 #if __SIZEOF_POINTER__ == 4
@@ -117,7 +113,6 @@ static void CapturingHandler_non_realtime(int signal, ...) {
 #endif
   context->ip += capturing_handler_skip;
 #undef FEX_IP_REG
-  capturing_handler_calls++;
 }
 
 /*
@@ -138,7 +133,6 @@ static void CapturingHandler_realtime_regparm(int signal, siginfo_t* siginfo, vo
 #endif
   _context->uc_mcontext.gregs[FEX_IP_REG] += capturing_handler_skip;
 #undef FEX_IP_REG
-  capturing_handler_calls++;
 }
 
 /*
@@ -171,7 +165,6 @@ static void CapturingHandler_non_realtime_regparm(int signal, siginfo_t* siginfo
 #endif
   context_stack->ip += capturing_handler_skip;
 #undef FEX_IP_REG
-  capturing_handler_calls++;
 }
 
 /*
@@ -199,7 +192,6 @@ static void CapturingHandler_realtime() {
 #endif
   _context->uc_mcontext.gregs[FEX_IP_REG] += capturing_handler_skip;
 #undef FEX_IP_REG
-  capturing_handler_calls++;
 }
 
 /*
@@ -221,6 +213,5 @@ static void CapturingHandler_realtime_glibc_helper(int signal, siginfo_t* siginf
 #endif
   _context->uc_mcontext.gregs[FEX_IP_REG] += capturing_handler_skip;
 #undef FEX_IP_REG
-  capturing_handler_calls++;
 }
 #endif

@@ -135,11 +135,6 @@ uint64_t GetWowTEB(void* TEB) {
     *reinterpret_cast<LONG*>(reinterpret_cast<uintptr_t>(TEB) + WowTEBOffsetMemberOffset) + reinterpret_cast<uint64_t>(TEB));
 }
 
-bool IsDispatcherAddress(uint64_t Address) {
-  const auto& Config = SignalDelegator->GetConfig();
-  return Address >= Config.DispatcherBegin && Address < Config.DispatcherEnd;
-}
-
 bool IsAddressInJit(uint64_t Address) {
   if (IsDispatcherAddress(Address)) {
     return true;
@@ -280,9 +275,7 @@ void ReconstructThreadState(CONTEXT* Context) {
 }
 
 WOW64_CONTEXT ReconstructWowContext(CONTEXT* Context) {
-  if (!IsDispatcherAddress(Context->Pc)) {
-    ReconstructThreadState(Context);
-  }
+  ReconstructThreadState(Context);
 
   WOW64_CONTEXT WowContext {
     .ContextFlags = WOW64_CONTEXT_ALL,
@@ -754,7 +747,7 @@ bool BTCpuResetToConsistentStateImpl(EXCEPTION_POINTERS* Ptrs) {
   auto& Fault = Thread->CurrentFrame->SynchronousFaultData;
   *Exception = FEX::Windows::HandleGuestException(Fault, *Exception, WowContext.Eip, WowContext.Eax);
   if (Exception->ExceptionCode == EXCEPTION_SINGLE_STEP) {
-    WowContext.EFlags &= ~(1 << FEXCore::X86State::RFLAG_TF_RAW_LOC);
+    WowContext.EFlags &= ~(1 << FEXCore::X86State::RFLAG_TF_LOC);
   }
   // wow64.dll will handle adjusting PC in the dispatched context after a breakpoint
 
