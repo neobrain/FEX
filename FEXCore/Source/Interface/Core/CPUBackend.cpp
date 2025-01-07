@@ -5,6 +5,8 @@
 #include "Interface/Core/CPUBackend.h"
 #include "Interface/Core/Dispatcher/Dispatcher.h"
 
+#include "FEXCore/Utils/Profiler.h"
+
 #ifndef _WIN32
 #include <sys/prctl.h>
 #endif
@@ -305,6 +307,7 @@ namespace CPU {
 #endif
   }
 
+
   CPUBackend::~CPUBackend() = default;
 
   auto CPUBackend::GetEmptyCodeBuffer() -> CodeBuffer* {
@@ -317,6 +320,7 @@ namespace CPU {
       // Allocate initial CodeBuffer and return it
       CurrentCodeBuffer = manager.GetCurrentCodeBuffer();
     } else {
+      TracyMessageL("Extending CodeBuffer");
       auto CurBuffer = manager.GetCurrentCodeBuffer();
       auto NewCodeBufferSize = std::min<size_t>(CurBuffer->Size * 1.5, MaxCodeSize);
       CurrentCodeBuffer = manager.AllocateNewCodeBuffer(NewCodeBufferSize);
@@ -338,6 +342,7 @@ namespace CPU {
   bool CPUBackend::CheckCodeBufferUpdate() {
     auto NewCodeBuffer = manager.GetCurrentCodeBuffer();
     if (CurrentCodeBuffer != NewCodeBuffer) {
+      TracyMessageL("Updating CodeBuffer");
       fmt::print(stderr, "Moving to new CodeBuffer generation in thread {}\n", ::gettid());
       CurrentCodeBuffer = NewCodeBuffer;
       // TODO: Release code buffer if count is zero...
@@ -345,6 +350,7 @@ namespace CPU {
       for (auto CodeBufferIt = manager.CodeBuffers.begin(); CodeBufferIt != manager.CodeBuffers.end();) {
         if (CodeBufferIt->expired()) {
           CodeBufferIt = manager.CodeBuffers.erase(CodeBufferIt);
+          TracyPlot("CodeBufferCount", static_cast<int64_t>(manager.CodeBuffers.size()));
         } else {
           ++CodeBufferIt;
         }
@@ -356,10 +362,13 @@ namespace CPU {
   }
 
   CodeBuffer::~CodeBuffer() {
+    TracyPlot("CodeBufferSize", static_cast<int64_t>(TotalCodeBufferSize -= Size));
     FEXCore::Allocator::VirtualFree(Ptr, Size);
   }
 
   auto CodeBufferManager::AllocateNewCodeBuffer(size_t Size) -> fextl::shared_ptr<CodeBuffer> {
+    TracyPlot("CodeBufferSize", static_cast<int64_t>(TotalCodeBufferSize += Size));
+
 #ifndef _WIN32
 // MDWE (Memory-Deny-Write-Execute) is a new Linux 6.3 feature.
 // It's equivalent to systemd's `MemoryDenyWriteExecute` but implemented entirely in the kernel.
@@ -402,10 +411,12 @@ namespace CPU {
     for (auto CodeBufferIt = CodeBuffers.begin(); CodeBufferIt != CodeBuffers.end();) {
       if (CodeBufferIt->expired()) {
         CodeBufferIt = CodeBuffers.erase(CodeBufferIt);
+        TracyPlot("CodeBufferCount", static_cast<int64_t>(CodeBuffers.size()));
       } else {
         ++CodeBufferIt;
       }
     }
+    TracyPlot("CodeBufferCount", static_cast<int64_t>(CodeBuffers.size()));
 
     fprintf(stderr, "ALLOCATED CODEBUFFER OF SIZE %#x, now at %d in total\n", (int)Size, (int)CodeBuffers.size());
     return Buffer;
@@ -413,6 +424,7 @@ namespace CPU {
 
   fextl::shared_ptr<CodeBuffer> CodeBufferManager::GetCurrentCodeBuffer() {
     if (!Latest) {
+      TracyMessageL("Creating first CodeBuffer");
       Latest = AllocateNewCodeBuffer(1024 * 1024 * /*128*/ 16); // TODO: Use InitialCodeSize instead
       LatestOffset = 0;
     }
