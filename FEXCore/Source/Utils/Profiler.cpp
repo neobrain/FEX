@@ -119,7 +119,7 @@ static bool Enable = false;
 
 static void SetupGraphs() {
   TracyPlotConfig("CodeBufferSize", tracy::PlotFormatType::Memory, true, true, 0);
-  TracyPlotConfig("CodeBufferSizeUsed", tracy::PlotFormatType::Percentage, true, true, 0);
+  TracyPlotConfig("CodeBufferSizeUsed", tracy::PlotFormatType::Memory, true, true, 0);
   TracyPlotConfig("CodeBufferCount", tracy::PlotFormatType::Number, true, false, 0);
 
   // TODO: Measure total time spent in the JIT

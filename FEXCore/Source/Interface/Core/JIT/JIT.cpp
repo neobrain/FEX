@@ -39,6 +39,15 @@ $end_info$
 #include <string.h>
 #include <limits>
 
+namespace FEXCore::CPU {
+extern std::atomic<uint64_t> TotalCodeBufferSize;
+extern std::atomic<uint64_t> TotalCodeBufferSizeUsed;
+} // namespace FEXCore::CPU
+
+namespace FEXCore::CPU {
+extern mymutex codebuffermutex;
+}
+
 static constexpr size_t INITIAL_CODE_SIZE = 1024 * 1024 * 16;
 // We don't want to move above 128MB atm because that means we will have to encode longer jumps
 static constexpr size_t MAX_CODE_SIZE = 1024 * 1024 * 128;
@@ -981,7 +990,9 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
   }
 #endif
 
-  FEXTracyPlot("CodeBufferSizeUsed", GetCursorOffset() * 100.f / GetBufferSize());
+  TotalCodeBufferSizeUsed += GetCursorOffset() - CurrentCodeBuffer->UsedSize;
+  CurrentCodeBuffer->UsedSize = GetCursorOffset();
+  FEXTracyPlot("CodeBufferSizeUsed", static_cast<int64_t>(TotalCodeBufferSizeUsed) /** 100.f / TotalCodeBufferSize*/);
 
   if (DebugData) {
     DebugData->HostCodeSize = CodeData.Size;

@@ -14,7 +14,8 @@
 
 namespace FEXCore {
 namespace CPU {
-  static std::atomic<uint64_t> TotalCodeBufferSize = 0;
+  std::atomic<uint64_t> TotalCodeBufferSize = 0;
+  std::atomic<uint64_t> TotalCodeBufferSizeUsed = 0;
   constexpr static uint64_t NamedVectorConstants[FEXCore::IR::NamedVectorConstant::NAMED_VECTOR_CONST_POOL_MAX][2] = {
     {0x0003'0002'0001'0000ULL, 0x0007'0006'0005'0004ULL}, // NAMED_VECTOR_INCREMENTAL_U16_INDEX
     {0x000B'000A'0009'0008ULL, 0x000F'000E'000D'000CULL}, // NAMED_VECTOR_INCREMENTAL_U16_INDEX_UPPER
@@ -385,6 +386,10 @@ namespace CPU {
   CodeBuffer::~CodeBuffer() {
     // TODO: Verify refcounts get appropriately released on forks!
     FEXTracyPlot("CodeBufferSize", static_cast<int64_t>(TotalCodeBufferSize -= Size));
+    FEXTracyPlot("CodeBufferSizeUsed", static_cast<int64_t>(TotalCodeBufferSizeUsed) /** 100.f / TotalCodeBufferSize*/);
+
+    TotalCodeBufferSizeUsed -= UsedSize;
+
     FEXCore::Allocator::VirtualFree(Ptr, Size);
   }
 
