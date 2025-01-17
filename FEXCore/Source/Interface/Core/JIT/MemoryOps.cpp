@@ -2317,7 +2317,8 @@ DEF_OP(ParanoidLoadMemTSO) {
     case IR::OpSize::i256Bit:
       LOGMAN_THROW_A_FMT(HostSupportsSVE256, "Need SVE256 support in order to use {} with 256-bit operation", __func__);
       dmb(ARMEmitter::BarrierScope::ISH);
-      ld1b<ARMEmitter::SubRegSize::i8Bit>(Dst.Z(), PRED_TMP_32B.Zeroing(), MemReg);
+      const auto MemSrc = GenerateSVEMemOperand(OpSize, MemReg, Op->Offset, Op->OffsetType, Op->OffsetScale);
+      ld1b<ARMEmitter::SubRegSize::i8Bit>(Dst.Z(), PRED_TMP_32B.Zeroing(), MemSrc);
       dmb(ARMEmitter::BarrierScope::ISH);
       break;
     default: LOGMAN_MSG_A_FMT("Unhandled ParanoidLoadMemTSO size: {}", OpSize); break;
