@@ -1561,99 +1561,6 @@ static bool HandleAtomicMemOp(uint32_t Instr, uint64_t* GPRs, uint32_t* StrictSp
   return false;
 }
 
-static bool HandleAtomicLoad(uint32_t Instr, uint64_t* GPRs, int64_t Offset) {
-  uint32_t Size = 1 << (Instr >> 30);
-
-  uint32_t ResultReg = Instr & 0b11111;
-  uint32_t AddressReg = (Instr >> 5) & 0b11111;
-
-  uint64_t Addr = GPRs[AddressReg] + Offset;
-
-  if (Size == 2) {
-    auto Res = DoLoad16(Addr);
-    // We set the result register if it isn't a zero register
-    if (ResultReg != 31) {
-      GPRs[ResultReg] = Res;
-    }
-    return true;
-  } else if (Size == 4) {
-    auto Res = DoLoad32(Addr);
-    // We set the result register if it isn't a zero register
-    if (ResultReg != 31) {
-      GPRs[ResultReg] = Res;
-    }
-    return true;
-  } else if (Size == 8) {
-    auto Res = DoLoad64(Addr);
-    // We set the result register if it isn't a zero register
-    if (ResultReg != 31) {
-      GPRs[ResultReg] = Res;
-    }
-    return true;
-  }
-
-  return false;
-}
-
-static bool HandleAtomicStore(uint32_t Instr, uint64_t* GPRs, int64_t Offset, uint32_t* StrictSplitLockMutex) {
-  uint32_t Size = 1 << (Instr >> 30);
-
-  uint32_t DataReg = Instr & 0x1F;
-  uint32_t AddressReg = (Instr >> 5) & 0b11111;
-
-  uint64_t Addr = GPRs[AddressReg] + Offset;
-
-  constexpr bool DoRetry = false;
-  if (Size == 2) {
-    DoCAS16<DoRetry>(
-      GPRs[DataReg],
-      0, // Unused
-      Addr,
-      [](uint16_t SrcVal, uint16_t) -> uint16_t {
-        // Expected is just src
-        return SrcVal;
-      },
-      [](uint16_t, uint16_t Desired) -> uint16_t {
-        // Desired is just Desired
-        return Desired;
-      },
-      StrictSplitLockMutex);
-    return true;
-  } else if (Size == 4) {
-    DoCAS32<DoRetry>(
-      GPRs[DataReg],
-      0, // Unused
-      Addr,
-      [](uint32_t SrcVal, uint32_t) -> uint32_t {
-        // Expected is just src
-        return SrcVal;
-      },
-      [](uint32_t, uint32_t Desired) -> uint32_t {
-        // Desired is just Desired
-        return Desired;
-      },
-      StrictSplitLockMutex);
-    return true;
-  } else if (Size == 8) {
-    DoCAS64<DoRetry>(
-      GPRs[DataReg],
-      0, // Unused
-      Addr,
-      [](uint64_t SrcVal, uint64_t) -> uint64_t {
-        // Expected is just src
-        return SrcVal;
-      },
-      [](uint64_t, uint64_t Desired) -> uint64_t {
-        // Desired is just Desired
-        return Desired;
-      },
-      StrictSplitLockMutex);
-    return true;
-  }
-
-  return false;
-}
-
 static uint64_t HandleCAS_NoAtomics(uintptr_t ProgramCounter, uint64_t* GPRs, uint32_t* StrictSplitLockMutex) {
   // ARMv8.0 CAS
   // [1] ldaxrb(TMP2.W(), MemOperand(MemSrc))
@@ -1983,41 +1890,13 @@ HandleUnalignedAccess(FEXCore::Core::InternalThreadState* Thread, UnalignedHandl
   if (HandleType == UnalignedHandlerType::Paranoid) [[unlikely]] {
     if ((Instr & LDAXR_MASK) == LDAR_INST ||  // LDAR*
         (Instr & LDAXR_MASK) == LDAPR_INST) { // LDAPR*
-      if (ArchHelpers::Arm64::HandleAtomicLoad(Instr, GPRs, 0)) {
-        // Skip this instruction now
-        return std::make_pair(true, 4);
-      } else {
-        LogMan::Msg::EFmt("Unhandled JIT SIGBUS LDAR*: PC: 0x{:x} Instruction: 0x{:08x}\n", ProgramCounter, PC[0]);
-        return NotHandled;
-      }
+      ERROR_AND_DIE_FMT("Unhandled JIT SIGBUS LDAR*: PC: 0x{:x} Instruction: 0x{:08x}\n", ProgramCounter, PC[0]);
     } else if ((Instr & LDAXR_MASK) == STLR_INST) { // STLR*
-      if (ArchHelpers::Arm64::HandleAtomicStore(Instr, GPRs, 0, StrictSplitLockMutex)) {
-        // Skip this instruction now
-        return std::make_pair(true, 4);
-      } else {
-        LogMan::Msg::EFmt("Unhandled JIT SIGBUS STLR*: PC: 0x{:x} Instruction: 0x{:08x}\n", ProgramCounter, PC[0]);
-        return NotHandled;
-      }
+      ERROR_AND_DIE_FMT("Unhandled JIT SIGBUS STLR*: PC: 0x{:x} Instruction: 0x{:08x}\n", ProgramCounter, PC[0]);
     } else if ((Instr & RCPC2_MASK) == LDAPUR_INST) { // LDAPUR*
-      // Extract the 9-bit offset from the instruction
-      int32_t Offset = static_cast<int32_t>(Instr) << 11 >> 23;
-      if (ArchHelpers::Arm64::HandleAtomicLoad(Instr, GPRs, Offset)) {
-        // Skip this instruction now
-        return std::make_pair(true, 4);
-      } else {
-        LogMan::Msg::EFmt("Unhandled JIT SIGBUS LDAPUR*: PC: 0x{:x} Instruction: 0x{:08x}\n", ProgramCounter, PC[0]);
-        return NotHandled;
-      }
+      ERROR_AND_DIE_FMT("Unhandled JIT SIGBUS LDAPUR*: PC: 0x{:x} Instruction: 0x{:08x}\n", ProgramCounter, PC[0]);
     } else if ((Instr & RCPC2_MASK) == STLUR_INST) { // STLUR*
-      // Extract the 9-bit offset from the instruction
-      int32_t Offset = static_cast<int32_t>(Instr) << 11 >> 23;
-      if (ArchHelpers::Arm64::HandleAtomicStore(Instr, GPRs, Offset, StrictSplitLockMutex)) {
-        // Skip this instruction now
-        return std::make_pair(true, 4);
-      } else {
-        LogMan::Msg::EFmt("Unhandled JIT SIGBUS LDLUR*: PC: 0x{:x} Instruction: 0x{:08x}\n", ProgramCounter, PC[0]);
-        return NotHandled;
-      }
+      ERROR_AND_DIE_FMT("Unhandled JIT SIGBUS STLUR*: PC: 0x{:x} Instruction: 0x{:08x}\n", ProgramCounter, PC[0]);
     }
   }
 

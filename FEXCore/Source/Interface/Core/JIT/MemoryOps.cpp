@@ -774,8 +774,7 @@ DEF_OP(LoadMemTSO) {
       case IR::OpSize::i64Bit: ldapur(Dst.X(), MemReg, Offset); break;
       default: LOGMAN_MSG_A_FMT("Unhandled LoadMemTSO size: {}", OpSize); break;
       }
-      // Half-barrier once back-patched.
-      nop();
+      dmb(ARMEmitter::BarrierScope::ISH);
     }
   } else if (CTX->HostFeatures.SupportsRCPC && Op->Class == FEXCore::IR::GPRClass) {
     const auto Dst = GetReg(Node);
@@ -1832,11 +1831,11 @@ DEF_OP(MemSet) {
       // 8bit load is always aligned to natural alignment
       stlrb(Value.W(), TMP2);
     } else {
-      nop();
+      dmb(ARMEmitter::BarrierScope::ISH);
       switch (OpSize) {
-      case 2: stlrh(Value.W(), TMP2); break;
-      case 4: stlr(Value.W(), TMP2); break;
-      case 8: stlr(Value.X(), TMP2); break;
+      case 2: strh(Value.W(), TMP2, 0); break;
+      case 4: str(Value.W(), TMP2, 0); break;
+      case 8: str(Value.X(), TMP2, 0); break;
       default: LOGMAN_MSG_A_FMT("Unhandled {} size: {}", __func__, Size); break;
       }
     }
@@ -2044,20 +2043,24 @@ DEF_OP(MemCpy) {
         stlrb(TMP4.W(), TMP2);
       } else {
         switch (OpSize) {
-        case 2: ldaprh(TMP4.W(), TMP3); break;
-        case 4: ldapr(TMP4.W(), TMP3); break;
-        case 8: ldapr(TMP4, TMP3); break;
+        case 2: ldrh(TMP4.W(), TMP3, 0); break;
+        case 4: ldr(TMP4.W(), TMP3, 0); break;
+        case 8: ldr(TMP4, TMP3, 0); break;
         default: LOGMAN_MSG_A_FMT("Unhandled {} size: {}", __func__, Size); break;
         }
 
-        // Placeholders for backpatching barriers (one per load/store)
-        nop();
-        nop();
+        if (false) {
+          // Placeholders for backpatching barriers (one per load/store)
+          nop();
+          nop();
+        } else {
+          dmb(ARMEmitter::BarrierScope::ISH);
+        }
 
         switch (OpSize) {
-        case 2: stlrh(TMP4.W(), TMP2); break;
-        case 4: stlr(TMP4.W(), TMP2); break;
-        case 8: stlr(TMP4, TMP2); break;
+        case 2: strh(TMP4.W(), TMP2, 0); break;
+        case 4: str(TMP4.W(), TMP2, 0); break;
+        case 8: str(TMP4, TMP2, 0); break;
         default: LOGMAN_MSG_A_FMT("Unhandled {} size: {}", __func__, Size); break;
         }
       }
@@ -2068,20 +2071,24 @@ DEF_OP(MemCpy) {
         stlrb(TMP4.W(), TMP2);
       } else {
         switch (OpSize) {
-        case 2: ldarh(TMP4.W(), TMP3); break;
-        case 4: ldar(TMP4.W(), TMP3); break;
-        case 8: ldar(TMP4, TMP3); break;
+        case 2: ldrh(TMP4.W(), TMP3, 0); break;
+        case 4: ldr(TMP4.W(), TMP3, 0); break;
+        case 8: ldr(TMP4, TMP3, 0); break;
         default: LOGMAN_MSG_A_FMT("Unhandled {} size: {}", __func__, Size); break;
         }
 
-        // Placeholders for backpatching barriers (one per load/store)
-        nop();
-        nop();
+        if (false) {
+          // Placeholders for backpatching barriers (one per load/store)
+          nop();
+          nop();
+        } else {
+          dmb(ARMEmitter::BarrierScope::ISH);
+        }
 
         switch (OpSize) {
-        case 2: stlrh(TMP4.W(), TMP2); break;
-        case 4: stlr(TMP4.W(), TMP2); break;
-        case 8: stlr(TMP4, TMP2); break;
+        case 2: strh(TMP4.W(), TMP2, 0); break;
+        case 4: str(TMP4.W(), TMP2, 0); break;
+        case 8: str(TMP4, TMP2, 0); break;
         default: LOGMAN_MSG_A_FMT("Unhandled {} size: {}", __func__, Size); break;
         }
       }
@@ -2241,15 +2248,19 @@ DEF_OP(ParanoidLoadMemTSO) {
   const auto Op = IROp->C<IR::IROp_LoadMemTSO>();
   const auto OpSize = IROp->Size;
 
-  auto MemReg = GetReg(Op->Addr.ID());
+  const auto MemReg = GetReg(Op->Addr.ID());
+
+  if (Op->Class == FEXCore::IR::GPRClass) {
+    LOGMAN_THROW_A_FMT(Op->Offset.IsInvalid() || CTX->HostFeatures.SupportsTSOImm9, "unexpected offset");
+    LOGMAN_THROW_A_FMT(Op->OffsetScale == 1, "unexpected offset scale");
+    LOGMAN_THROW_A_FMT(Op->OffsetType == IR::MEM_OFFSET_SXTX, "unexpected offset type");
+  }
 
   if (CTX->HostFeatures.SupportsTSOImm9 && Op->Class == FEXCore::IR::GPRClass) {
     const auto Dst = GetReg(Node);
     uint64_t Offset = 0;
     if (!Op->Offset.IsInvalid()) {
-      if (!IsInlineConstant(Op->Offset, &Offset)) {
-        MemReg = ApplyMemOperand(OpSize, MemReg, TMP4, Op->Offset, Op->OffsetType, Op->OffsetScale);
-      }
+      LOGMAN_THROW_A_FMT(IsInlineConstant(Op->Offset, &Offset), "expected immediate");
     }
 
     if (OpSize == IR::OpSize::i8Bit) {
@@ -2258,71 +2269,62 @@ DEF_OP(ParanoidLoadMemTSO) {
       ldapurb(Dst, MemReg, Offset);
     } else {
       switch (OpSize) {
-      case IR::OpSize::i16Bit: ldapurh(Dst, MemReg, Offset); break;
-      case IR::OpSize::i32Bit: ldapur(Dst.W(), MemReg, Offset); break;
-      case IR::OpSize::i64Bit: ldapur(Dst.X(), MemReg, Offset); break;
-      default: LOGMAN_MSG_A_FMT("Unhandled ParanoidLoadMemTSO size: {}", OpSize); break;
+      case IR::OpSize::i16Bit: ldurh(Dst, MemReg, Offset); break;
+      case IR::OpSize::i32Bit: ldur(Dst.W(), MemReg, Offset); break;
+      case IR::OpSize::i64Bit: ldur(Dst.X(), MemReg, Offset); break;
+      default: LOGMAN_MSG_A_FMT("Unhandled LoadMemTSO size: {}", OpSize); break;
       }
+      dmb(ARMEmitter::BarrierScope::ISHLD);
     }
   } else if (CTX->HostFeatures.SupportsRCPC && Op->Class == FEXCore::IR::GPRClass) {
     const auto Dst = GetReg(Node);
-    MemReg = ApplyMemOperand(OpSize, MemReg, TMP4, Op->Offset, Op->OffsetType, Op->OffsetScale);
     if (OpSize == IR::OpSize::i8Bit) {
       // 8bit load is always aligned to natural alignment
       ldaprb(Dst.W(), MemReg);
     } else {
       switch (OpSize) {
+      // TODO: Fixup for non-signal?
       case IR::OpSize::i16Bit: ldaprh(Dst.W(), MemReg); break;
       case IR::OpSize::i32Bit: ldapr(Dst.W(), MemReg); break;
       case IR::OpSize::i64Bit: ldapr(Dst.X(), MemReg); break;
-      default: LOGMAN_MSG_A_FMT("Unhandled ParanoidLoadMemTSO size: {}", OpSize); break;
+      default: LOGMAN_MSG_A_FMT("Unhandled LoadMemTSO size: {}", OpSize); break;
       }
+      dmb(ARMEmitter::BarrierScope::ISHLD);
     }
   } else if (Op->Class == FEXCore::IR::GPRClass) {
     const auto Dst = GetReg(Node);
-    MemReg = ApplyMemOperand(OpSize, MemReg, TMP4, Op->Offset, Op->OffsetType, Op->OffsetScale);
-    switch (OpSize) {
-    case IR::OpSize::i8Bit: ldarb(Dst, MemReg); break;
-    case IR::OpSize::i16Bit: ldarh(Dst, MemReg); break;
-    case IR::OpSize::i32Bit: ldar(Dst.W(), MemReg); break;
-    case IR::OpSize::i64Bit: ldar(Dst.X(), MemReg); break;
-    default: LOGMAN_MSG_A_FMT("Unhandled ParanoidLoadMemTSO size: {}", OpSize); break;
+    if (OpSize == IR::OpSize::i8Bit) {
+      // 8bit load is always aligned to natural alignment
+      ldarb(Dst, MemReg);
+    } else {
+      switch (OpSize) {
+      case IR::OpSize::i16Bit: ldrh(Dst, MemReg); break;
+      case IR::OpSize::i32Bit: ldr(Dst.W(), MemReg); break;
+      case IR::OpSize::i64Bit: ldr(Dst.X(), MemReg); break;
+      default: LOGMAN_MSG_A_FMT("Unhandled LoadMemTSO size: {}", OpSize); break;
+      }
+      dmb(ARMEmitter::BarrierScope::ISHLD);
     }
   } else {
     const auto Dst = GetVReg(Node);
-    MemReg = ApplyMemOperand(OpSize, MemReg, TMP4, Op->Offset, Op->OffsetType, Op->OffsetScale);
+    const auto MemSrc = GenerateMemOperand(OpSize, MemReg, Op->Offset, Op->OffsetType, Op->OffsetScale);
     switch (OpSize) {
-    case IR::OpSize::i8Bit:
-      ldarb(TMP1, MemReg);
-      fmov(ARMEmitter::Size::i32Bit, Dst.S(), TMP1.W());
-      break;
-    case IR::OpSize::i16Bit:
-      ldarh(TMP1, MemReg);
-      fmov(ARMEmitter::Size::i32Bit, Dst.S(), TMP1.W());
-      break;
-    case IR::OpSize::i32Bit:
-      ldar(TMP1.W(), MemReg);
-      fmov(ARMEmitter::Size::i32Bit, Dst.S(), TMP1.W());
-      break;
-    case IR::OpSize::i64Bit:
-      ldar(TMP1, MemReg);
-      fmov(ARMEmitter::Size::i64Bit, Dst.D(), TMP1);
-      break;
-    case IR::OpSize::i128Bit:
-      ldaxp(ARMEmitter::Size::i64Bit, TMP1, TMP2, MemReg);
-      clrex();
-      ins(ARMEmitter::SubRegSize::i64Bit, Dst, 0, TMP1);
-      ins(ARMEmitter::SubRegSize::i64Bit, Dst, 1, TMP2);
-      break;
-    case IR::OpSize::i256Bit:
+    case IR::OpSize::i8Bit: ldrb(Dst, MemSrc); break;
+    case IR::OpSize::i16Bit: ldrh(Dst, MemSrc); break;
+    case IR::OpSize::i32Bit: ldr(Dst.S(), MemSrc); break;
+    case IR::OpSize::i64Bit: ldr(Dst.D(), MemSrc); break;
+    case IR::OpSize::i128Bit: ldr(Dst.Q(), MemSrc); break;
+    case IR::OpSize::i256Bit: {
       LOGMAN_THROW_A_FMT(HostSupportsSVE256, "Need SVE256 support in order to use {} with 256-bit operation", __func__);
-      dmb(ARMEmitter::BarrierScope::ISH);
       const auto MemSrc = GenerateSVEMemOperand(OpSize, MemReg, Op->Offset, Op->OffsetType, Op->OffsetScale);
+      // TODO: Paranoid TSO path used to dmb before and after this!
       ld1b<ARMEmitter::SubRegSize::i8Bit>(Dst.Z(), PRED_TMP_32B.Zeroing(), MemSrc);
-      dmb(ARMEmitter::BarrierScope::ISH);
       break;
-    default: LOGMAN_MSG_A_FMT("Unhandled ParanoidLoadMemTSO size: {}", OpSize); break;
     }
+    default: LOGMAN_MSG_A_FMT("Unhandled LoadMemTSO size: {}", OpSize); break;
+    }
+    // Half-barrier.
+    dmb(ARMEmitter::BarrierScope::ISHLD);
   }
 }
 
@@ -2330,81 +2332,67 @@ DEF_OP(ParanoidStoreMemTSO) {
   const auto Op = IROp->C<IR::IROp_StoreMemTSO>();
   const auto OpSize = IROp->Size;
 
-  auto MemReg = GetReg(Op->Addr.ID());
+  const auto MemReg = GetReg(Op->Addr.ID());
+
+  if (Op->Class == FEXCore::IR::GPRClass) {
+    LOGMAN_THROW_A_FMT(Op->Offset.IsInvalid() || CTX->HostFeatures.SupportsTSOImm9, "unexpected offset");
+    LOGMAN_THROW_A_FMT(Op->OffsetScale == 1, "unexpected offset scale");
+    LOGMAN_THROW_A_FMT(Op->OffsetType == IR::MEM_OFFSET_SXTX, "unexpected offset type");
+  }
 
   if (CTX->HostFeatures.SupportsTSOImm9 && Op->Class == FEXCore::IR::GPRClass) {
     const auto Src = GetZeroableReg(Op->Value);
     uint64_t Offset = 0;
     if (!Op->Offset.IsInvalid()) {
-      if (!IsInlineConstant(Op->Offset, &Offset)) {
-        MemReg = ApplyMemOperand(OpSize, MemReg, TMP1, Op->Offset, Op->OffsetType, Op->OffsetScale);
-      }
+      LOGMAN_THROW_A_FMT(IsInlineConstant(Op->Offset, &Offset), "expected immediate");
     }
 
     if (OpSize == IR::OpSize::i8Bit) {
       // 8bit load is always aligned to natural alignment
       stlurb(Src, MemReg, Offset);
     } else {
+      dmb(ARMEmitter::BarrierScope::ISH);
       switch (OpSize) {
-      case IR::OpSize::i16Bit: stlurh(Src, MemReg, Offset); break;
-      case IR::OpSize::i32Bit: stlur(Src.W(), MemReg, Offset); break;
-      case IR::OpSize::i64Bit: stlur(Src.X(), MemReg, Offset); break;
-      default: LOGMAN_MSG_A_FMT("Unhandled ParanoidStoreMemTSO size: {}", OpSize); break;
+      case IR::OpSize::i16Bit: sturh(Src, MemReg, Offset); break;
+      case IR::OpSize::i32Bit: stur(Src.W(), MemReg, Offset); break;
+      case IR::OpSize::i64Bit: stur(Src.X(), MemReg, Offset); break;
+      default: LOGMAN_MSG_A_FMT("Unhandled StoreMemTSO size: {}", OpSize); break;
       }
     }
   } else if (Op->Class == FEXCore::IR::GPRClass) {
     const auto Src = GetZeroableReg(Op->Value);
-    MemReg = ApplyMemOperand(OpSize, MemReg, TMP1, Op->Offset, Op->OffsetType, Op->OffsetScale);
-    switch (OpSize) {
-    case IR::OpSize::i8Bit: stlrb(Src, MemReg); break;
-    case IR::OpSize::i16Bit: stlrh(Src, MemReg); break;
-    case IR::OpSize::i32Bit: stlr(Src.W(), MemReg); break;
-    case IR::OpSize::i64Bit: stlr(Src.X(), MemReg); break;
-    default: LOGMAN_MSG_A_FMT("Unhandled ParanoidStoreMemTSO size: {}", OpSize); break;
+
+    if (OpSize == IR::OpSize::i8Bit) {
+      // 8bit load is always aligned to natural alignment
+      stlrb(Src, MemReg);
+    } else {
+      dmb(ARMEmitter::BarrierScope::ISH);
+      switch (OpSize) {
+      case IR::OpSize::i16Bit: strh(Src, MemReg); break;
+      case IR::OpSize::i32Bit: str(Src.W(), MemReg); break;
+      case IR::OpSize::i64Bit: str(Src.X(), MemReg); break;
+      default: LOGMAN_MSG_A_FMT("Unhandled StoreMemTSO size: {}", OpSize); break;
+      }
     }
   } else {
+    // Half-Barrier.
+    dmb(ARMEmitter::BarrierScope::ISH);
+
     const auto Src = GetVReg(Op->Value.ID());
-
-    MemReg = ApplyMemOperand(OpSize, MemReg, TMP4, Op->Offset, Op->OffsetType, Op->OffsetScale);
-
+    const auto MemSrc = GenerateMemOperand(OpSize, MemReg, Op->Offset, Op->OffsetType, Op->OffsetScale);
     switch (OpSize) {
-    case IR::OpSize::i8Bit:
-      umov<ARMEmitter::SubRegSize::i8Bit>(TMP1, Src, 0);
-      stlrb(TMP1, MemReg);
-      break;
-    case IR::OpSize::i16Bit:
-      umov<ARMEmitter::SubRegSize::i16Bit>(TMP1, Src, 0);
-      stlrh(TMP1, MemReg);
-      break;
-    case IR::OpSize::i32Bit:
-      umov<ARMEmitter::SubRegSize::i32Bit>(TMP1, Src, 0);
-      stlr(TMP1.W(), MemReg);
-      break;
-    case IR::OpSize::i64Bit:
-      umov<ARMEmitter::SubRegSize::i64Bit>(TMP1, Src, 0);
-      stlr(TMP1, MemReg);
-      break;
-    case IR::OpSize::i128Bit: {
-      // Move vector to GPRs
-      umov<ARMEmitter::SubRegSize::i64Bit>(TMP1, Src, 0);
-      umov<ARMEmitter::SubRegSize::i64Bit>(TMP2, Src, 1);
-      ARMEmitter::BackwardLabel B;
-      Bind(&B);
-
-      // ldaxp must not have both the destination registers be the same
-      ldaxp(ARMEmitter::Size::i64Bit, ARMEmitter::Reg::zr, TMP3, MemReg); // <- Can hit SIGBUS. Overwritten with DMB
-      stlxp(ARMEmitter::Size::i64Bit, TMP3, TMP1, TMP2, MemReg);          // <- Can also hit SIGBUS
-      cbnz(ARMEmitter::Size::i64Bit, TMP3, &B);                           // < Overwritten with DMB
-      break;
-    }
+    case IR::OpSize::i8Bit: strb(Src, MemSrc); break;
+    case IR::OpSize::i16Bit: strh(Src, MemSrc); break;
+    case IR::OpSize::i32Bit: str(Src.S(), MemSrc); break;
+    case IR::OpSize::i64Bit: str(Src.D(), MemSrc); break;
+    case IR::OpSize::i128Bit: str(Src.Q(), MemSrc); break;
     case IR::OpSize::i256Bit: {
       LOGMAN_THROW_A_FMT(HostSupportsSVE256, "Need SVE256 support in order to use {} with 256-bit operation", __func__);
-      dmb(ARMEmitter::BarrierScope::ISH);
-      st1b<ARMEmitter::SubRegSize::i8Bit>(Src.Z(), PRED_TMP_32B, MemReg, 0);
-      dmb(ARMEmitter::BarrierScope::ISH);
+      const auto Operand = GenerateSVEMemOperand(OpSize, MemReg, Op->Offset, Op->OffsetType, Op->OffsetScale);
+      st1b<ARMEmitter::SubRegSize::i8Bit>(Src.Z(), PRED_TMP_32B, Operand);
       break;
     }
-    default: LOGMAN_MSG_A_FMT("Unhandled ParanoidStoreMemTSO size: {}", OpSize); break;
+    default: LOGMAN_MSG_A_FMT("Unhandled StoreMemTSO size: {}", OpSize); break;
     }
   }
 }
