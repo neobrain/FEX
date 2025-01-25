@@ -107,8 +107,8 @@ foreach(GUEST_BITNESS IN LISTS BITNESS_LIST)
   #generate(libfex_malloc)
   #add_host_lib(fex_malloc ${GUEST_BITNESS})
 
-  generate(libasound ${CMAKE_CURRENT_SOURCE_DIR}/../libasound/libasound_interface.cpp ${GUEST_BITNESS})
-  add_host_lib(asound ${GUEST_BITNESS})
+  # generate(libasound ${CMAKE_CURRENT_SOURCE_DIR}/../libasound/libasound_interface.cpp ${GUEST_BITNESS})
+  # add_host_lib(asound ${GUEST_BITNESS})
 
   # disabled for now, headers are platform specific
   # find_package(SDL2 REQUIRED)
