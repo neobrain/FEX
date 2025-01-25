@@ -30,6 +30,8 @@ __attribute__((weak)) HostToGuestTrampolinePtr* FinalizeHostTrampolineForGuestFu
 __attribute__((weak)) void* GetGuestStack();
 
 __attribute__((weak)) void MoveGuestStack(uintptr_t NewAddress);
+
+__attribute__((weak)) void SetFrameMarker();
 } // namespace FEX::HLE
 
 template<typename Fn>

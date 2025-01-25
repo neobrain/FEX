@@ -149,6 +149,8 @@ auto fexfn_impl_libGL_glXGetProcAddress(const GLubyte* name) -> void (*)() {
   } else if (name_sv == "glXGetSelectedEventSGIX") {
     return (VoidFn)fexfn_impl_libGL_glXGetSelectedEventSGIX;
 #endif
+  } else if (name_sv == "glXSwapBuffers") {
+    return (VoidFn)fexfn_impl_libGL_glXSwapBuffers;
   }
   return (VoidFn)glXGetProcAddress((const GLubyte*)name);
 }
@@ -416,6 +418,11 @@ int fexfn_impl_libGL_glXGetConfig(Display* Display, guest_layout<XVisualInfo*> I
   auto ret = fexldr_ptr_libGL_glXGetConfig(Display, HostInfo, Attribute, Value);
   x11_manager.HostXFree(HostInfo);
   return ret;
+}
+
+void fexfn_impl_libGL_glXSwapBuffers(Display* Display, GLXDrawable Drawable) {
+  FEX::HLE::SetFrameMarker();
+  fexldr_ptr_libGL_glXSwapBuffers(Display, Drawable);
 }
 
 guest_layout<XVisualInfo*> fexfn_impl_libGL_glXGetVisualFromFBConfig(Display* Display, GLXFBConfig Config) {
