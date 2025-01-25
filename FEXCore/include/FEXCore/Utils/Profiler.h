@@ -146,6 +146,8 @@ static void Init(std::string_view ProgramName, std::string_view ProgramPath) {}
 [[maybe_unused]]
 static void PostForkAction(bool IsChild) {}
 [[maybe_unused]]
+static bool IsActive() { return false; }
+[[maybe_unused]]
 static void Shutdown() {}
 [[maybe_unused]]
 static void TraceObject(std::string_view const Format) {}
@@ -167,3 +169,7 @@ static void TraceObject(std::string_view const, uint64_t) {}
 
 #endif
 } // namespace FEXCore::Profiler
+
+// TODO: Drop
+#define FEXTracyPlot if (FEXCore::Profiler::IsActive()) TracyPlot
+#define FEXTracyMessageL if (FEXCore::Profiler::IsActive()) TracyMessageL
