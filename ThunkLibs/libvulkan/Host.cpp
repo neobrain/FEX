@@ -190,6 +190,16 @@ static void FEXFN_IMPL(vkFreeMemory)(VkDevice a_0, VkDeviceMemory a_1, const VkA
   LDR_PTR(vkFreeMemory)(a_0, a_1, nullptr);
 }
 
+static VkResult FEXFN_IMPL(vkQueuePresentKHR)(VkQueue a_0, const VkPresentInfoKHR* info) {
+  // auto overridden_callback = host_layout<VkDebugReportCallbackCreateInfoEXT> {*a_1.get_pointer()}.data;
+  // overridden_callback.pfnCallback = DummyVkDebugReportCallback;
+  // (void*&)LDR_PTR(vkQueuePresentKHR) = (void*)LDR_PTR(vkGetInstanceProcAddr)(a_0, "vkQueuePresentKHR");
+  // fprintf(stderr, "YOLOYOLOYOOOO\n");
+  FEX::HLE::SetFrameMarker();
+  return LDR_PTR(vkQueuePresentKHR)(a_0, info);
+}
+
+// TODO: Seems like we don't use this?
 static VkResult FEXFN_IMPL(vkCreateDebugReportCallbackEXT)(VkInstance a_0, guest_layout<const VkDebugReportCallbackCreateInfoEXT*> a_1,
                                                            const VkAllocationCallbacks* a_2, VkDebugReportCallbackEXT* a_3) {
   auto overridden_callback = host_layout<VkDebugReportCallbackCreateInfoEXT> {*a_1.get_pointer()}.data;
@@ -370,6 +380,8 @@ static PFN_vkVoidFunction LookupCustomVulkanFunction(const char* a_1) {
     return (PFN_vkVoidFunction)fexfn_impl_libvulkan_vkGetPhysicalDeviceXcbPresentationSupportKHR;
   } else if (a_1 == "vkGetPhysicalDeviceXlibPresentationSupportKHR"sv) {
     return (PFN_vkVoidFunction)fexfn_impl_libvulkan_vkGetPhysicalDeviceXlibPresentationSupportKHR;
+  } else if (a_1 == "vkQueuePresentKHR"sv) {
+    return (PFN_vkVoidFunction)fexfn_impl_libvulkan_vkQueuePresentKHR;
 #ifdef IS_32BIT_THUNK
   } else if (a_1 == "vkAllocateCommandBuffers"sv) {
     return (PFN_vkVoidFunction)fexfn_impl_libvulkan_vkAllocateCommandBuffers;

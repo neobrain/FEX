@@ -2183,7 +2183,7 @@ struct fex_gen_config<vkGetSwapchainImagesKHR> {};
 template<>
 struct fex_gen_config<vkAcquireNextImageKHR> {};
 template<>
-struct fex_gen_config<vkQueuePresentKHR> {};
+struct fex_gen_config<vkQueuePresentKHR> : fexgen::custom_host_impl {};
 #ifndef IS_32BIT_THUNK
 template<>
 struct fex_gen_config<vkGetDeviceGroupPresentCapabilitiesKHR> {};
