@@ -15,8 +15,9 @@ $end_info$
 #include <FEXCore/Core/X86Enums.h>
 #include <FEXCore/Core/Thunks.h>
 #include <FEXCore/Debug/InternalThreadState.h>
-#include <FEXCore/Utils/LogManager.h>
 #include <FEXCore/Utils/CompilerDefs.h>
+#include <FEXCore/Utils/LogManager.h>
+#include <FEXCore/Utils/Profiler.h>
 #include <FEXCore/fextl/set.h>
 #include <FEXCore/fextl/string.h>
 #include <FEXCore/fextl/unordered_map.h>
@@ -29,6 +30,8 @@ $end_info$
 #include <shared_mutex>
 #include <stdint.h>
 #include <utility>
+
+#include "tracy/Tracy.hpp"
 
 #ifdef ENABLE_JEMALLOC_GLIBC
 extern "C" {
@@ -331,6 +334,12 @@ MakeHostTrampolineForGuestFunction(void* HostPacker, uintptr_t GuestTarget, uint
 
   ThunkHandler->GuestcallToHostTrampoline[gci] = HostTrampoline;
   return HostTrampoline;
+}
+
+FEX_DEFAULT_VISIBILITY void SetFrameMarker() {
+  if (FEXCore::Profiler::IsActive()) {
+    FrameMark;
+  }
 }
 
 FEX_DEFAULT_VISIBILITY void FinalizeHostTrampolineForGuestFunction(HostToGuestTrampolinePtr* TrampolineAddress, void* HostPacker) {
