@@ -907,9 +907,9 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, const FEXCore
   }
 #endif
 
-  TotalCodeBufferSizeUsed += GetCursorOffset() - CurrentCodeBuffer->UsedSize;
-  CurrentCodeBuffer->UsedSize = GetCursorOffset();
-  FEXTracyPlot("CodeBufferSizeUsed", static_cast<int64_t>(TotalCodeBufferSizeUsed) /** 100.f / TotalCodeBufferSize*/);
+  // TotalCodeBufferSizeUsed += GetCursorOffset() - CurrentCodeBuffer->UsedSize;
+  // CurrentCodeBuffer->UsedSize = GetCursorOffset();
+  // FEXTracyPlot("CodeBufferSizeUsed", static_cast<int64_t>(TotalCodeBufferSizeUsed) /** 100.f / TotalCodeBufferSize*/);
 
   if (DebugData) {
     DebugData->HostCodeSize = CodeData.Size;
