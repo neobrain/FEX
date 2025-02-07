@@ -273,8 +273,7 @@ public:
   void RemoveCustomIREntrypoint(uintptr_t Entrypoint);
 
   struct GenerateIRResult {
-    std::optional<IR::IRListView> IRView;
-    IR::RegisterAllocationData* RAData;
+    fextl::unique_ptr<FEXCore::IR::IRStorageBase> IR;
     uint64_t TotalInstructions;
     uint64_t TotalInstructionsLength;
     uint64_t StartAddr;
@@ -285,7 +284,9 @@ public:
 
   struct CompileCodeResult {
     void* CompiledCode;
-    fextl::unique_ptr<FEXCore::Core::DebugData> DebugData;
+    fextl::unique_ptr<FEXCore::IR::IRStorageBase> IR;
+    FEXCore::Core::DebugData* DebugData;
+    bool GeneratedIR;
     uint64_t StartAddr;
     uint64_t Length;
   };
