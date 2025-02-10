@@ -1076,6 +1076,34 @@ Decoder::DecodedBlockStatus Decoder::DecodeInstruction(uint64_t PC) {
   return DecodedBlockStatus::SUCCESS;
 }
 
+static void ProcessExternalBranch(FEXCore::X86Tables::DecodedInst& DecodeInst, fextl::set<uint64_t>& ExternalBranches) {
+  const auto InstEnd = DecodeInst.PC + DecodeInst.InstSize;
+
+  switch (DecodeInst.OP) {
+  case 0x70 ... 0x7F: // Conditional JUMP
+  case 0x80 ... 0x8F: // More conditional
+    // Source is a literal
+    // auto RIPOffset = LoadSource(Op, Op->Src[0], Op->Flags);
+    // auto RIPTargetConst = _Constant(Op->PC + Op->InstSize);
+    // Target offset is PC + InstSize + Literal
+    ExternalBranches.insert(InstEnd + DecodeInst.Src[0].Literal());
+    break;
+
+  case 0xE9:
+  case 0xEB: // Both are unconditional JMP instructions
+    ExternalBranches.insert(InstEnd + DecodeInst.Src[0].Literal());
+    break;
+
+  case 0xE8: // Call - Immediate target, We don't want to inline calls
+    ExternalBranches.insert(InstEnd);
+    break;
+
+  case 0xC2: // RET imm
+  case 0xC3: // RET
+  default: break;
+  }
+}
+
 void Decoder::BranchTargetInMultiblockRange() {
   if (!CTX->Config.Multiblock) {
     return;
@@ -1118,7 +1146,7 @@ void Decoder::BranchTargetInMultiblockRange() {
     break;
   case 0xC2: // RET imm
   case 0xC3: // RET
-  default: return; break;
+  default: return;
   }
 
   if (GPRSize == IR::OpSize::i32Bit) {
@@ -1150,9 +1178,6 @@ void Decoder::BranchTargetInMultiblockRange() {
 
     AddBranchTarget(TargetRIP);
   } else {
-    if (ExternalBranches) {
-      ExternalBranches->insert(TargetRIP);
-    }
   }
 }
 
@@ -1459,6 +1484,11 @@ void Decoder::DecodeInstructionsAtEntry(FEXCore::Core::InternalThreadState* Thre
                             OpAddress);
         }
         break;
+      }
+
+      if (ExternalBranches && DecodeInst->TableInfo->Flags & FEXCore::X86Tables::InstFlags::FLAGS_SETS_RIP) {
+        // TODO: Even if multiblock must stop, continue discovering external branches...
+        ProcessExternalBranch(*DecodeInst, *ExternalBranches);
       }
 
       // Check if we need to end the entire multiblock
