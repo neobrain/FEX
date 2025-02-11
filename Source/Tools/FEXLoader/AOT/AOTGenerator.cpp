@@ -97,14 +97,11 @@ void AOTGenSection(FEXCore::Context::Context* CTX, ELFCodeLoader::LoadedSection&
 
   InitialBranchTargets.clear();
 
-
-  std::mutex QueueMutex;
-  fextl::vector<std::thread> ThreadPool;
-
   // This code is tricky to refactor so it doesn't allocate memory through glibc.
   FEXCore::Allocator::YesIKnowImNotSupposedToUseTheGlibcAllocator glibc;
-  for (int i = 0; i < FEXCore::CPUInfo::CalculateNumberOfCPUs(); i++) {
-    std::thread thd([&BranchTargets, CTX, &counter, &Compiled, &Section, &QueueMutex, SectionMaxAddress]() {
+  // TODO: Restore multi-threading support. Currently ineffective since JIT was temporarily made thread-exclusive anyway
+  {
+    {
       // Set the priority of the thread so it doesn't overwhelm the system when running in the background
       setpriority(PRIO_PROCESS, FHU::Syscalls::gettid(), 19);
 
@@ -113,60 +110,53 @@ void AOTGenSection(FEXCore::Context::Context* CTX, ELFCodeLoader::LoadedSection&
       fextl::set<uint64_t> ExternalBranchesLocal;
       CTX->ConfigureAOTGen(Thread, &ExternalBranchesLocal, SectionMaxAddress);
 
-      for (;;) {
-        uint64_t BranchTarget;
+      // TODO: Ensure CodeBuffer never resizes!
 
-        // Get a entrypoint to process from the queue
-        QueueMutex.lock();
+      while (true) {
         if (BranchTargets.empty()) {
-          QueueMutex.unlock();
           break; // no entrypoint to process - exit
         }
 
-        BranchTarget = BranchTargets.front();
+        uint64_t BranchTarget = BranchTargets.front();
         BranchTargets.pop();
-        QueueMutex.unlock();
 
         // Compile entrypoint
         counter++;
         CTX->CompileRIP(Thread, BranchTarget);
 
-        // Are there more branches?
-        if (ExternalBranchesLocal.size() > 0) {
-          // Add them to the "to process" list
-          QueueMutex.lock();
-          for (auto Destination : ExternalBranchesLocal) {
-            if (!(Destination >= Section.Base && Destination <= (Section.Base + Section.Size))) {
-              continue;
-            }
-            if (Compiled.contains(Destination)) {
-              continue;
-            }
-            Compiled.insert(Destination);
-            BranchTargets.push(Destination);
+        // Add external branches to the "to process" list
+        for (auto Destination : ExternalBranchesLocal) {
+          if (!(Destination >= Section.Base && Destination <= (Section.Base + Section.Size))) {
+            continue;
           }
-          QueueMutex.unlock();
-          ExternalBranchesLocal.clear();
+          if (Compiled.contains(Destination)) {
+            continue;
+          }
+          Compiled.insert(Destination);
+          BranchTargets.push(Destination);
         }
+        ExternalBranchesLocal.clear();
       }
+
+      // Thread->CPUBackend.get()
+
+      // Thread->LookupCache;
+
+      // TODO: Dump LookupCache to file (through new CPUBackend interface?)
+      // TODO: Dump CodeBuffer to file (through new CPUBackend interface?)
+
 
       // All entryproints processed, cleanup this thread
       CTX->DestroyThread(Thread);
       // This thread is now getting abandoned. Disable glibc allocator checking so glibc can safely cleanup its internal allocations.
-      FEXCore::Allocator::YesIKnowImNotSupposedToUseTheGlibcAllocator::HardDisable();
-    });
+      // FEXCore::Allocator::YesIKnowImNotSupposedToUseTheGlibcAllocator::HardDisable();
 
-    // Add to the thread pool
-    ThreadPool.push_back(std::move(thd));
+      //   // Add to the thread pool
+      //   ThreadPool.push_back(std::move(thd));
+    }
+    // });
   }
 
-  // Make sure all threads are finished
-  for (auto& Thread : ThreadPool) {
-    Thread.join();
-  }
-
-  ThreadPool.clear();
-
-  LogMan::Msg::IFmt("\nAll Done: {}", counter.load());
+  LogMan::Msg::EFmt("\nAll Done: {}", counter.load());
 }
 } // namespace FEX::AOT
