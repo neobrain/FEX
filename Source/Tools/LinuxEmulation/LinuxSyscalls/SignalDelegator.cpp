@@ -61,6 +61,7 @@ static void SignalHandlerThunk(int Signal, siginfo_t* Info, void* UContext) {
   ucontext_t* _context = (ucontext_t*)UContext;
   auto ThreadObject = GetThreadFromAltStack(_context->uc_stack);
   FEXCORE_PROFILE_ACCUMULATION(ThreadObject->Thread, AccumulatedSignalTime);
+  FEXCORE_PROFILE_SCOPED("GuestSignalHandler");
   ThreadObject->SignalInfo.Delegator->HandleSignal(ThreadObject, Signal, Info, UContext);
 }
 
@@ -925,6 +926,8 @@ SignalDelegator::SignalDelegator(FEXCore::Context::Context* _CTX, const std::str
     }
 
     FEXCORE_PROFILE_INSTANT_INCREMENT(Thread, AccumulatedSIGBUSCount, 1);
+    FEXCORE_PROFILE_SCOPED("HandleAuxSIGBUS");
+
     const auto Delegator = FEX::HLE::ThreadManager::GetStateObjectFromFEXCoreThread(Thread)->SignalInfo.Delegator;
     const auto Result = FEXCore::ArchHelpers::Arm64::HandleUnalignedAccess(Thread, Delegator->GetUnalignedHandlerType(), PC,
                                                                            ArchHelpers::Context::GetArmGPRs(ucontext));
