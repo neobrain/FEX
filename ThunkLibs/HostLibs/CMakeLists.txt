@@ -5,9 +5,10 @@ include(GNUInstallDirs)
 
 set(CMAKE_CXX_STANDARD 20)
 set (HOSTLIBS_DATA_DIRECTORY "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/fex-emu" CACHE PATH "global data directory")
-option(ENABLE_CLANG_THUNKS "Enable building thunks with clang" FALSE)
+# TODO: Definitely not needed
+option(ENABLE_CLANG_CROSSCOMPILING "Use clang for cross-compiling" TRUE)
 
-if (ENABLE_CLANG_THUNKS)
+if (ENABLE_CLANG_CROSSCOMPILING)
   set (LD_OVERRIDE "-fuse-ld=lld")
   add_link_options(${LD_OVERRIDE})
 endif()

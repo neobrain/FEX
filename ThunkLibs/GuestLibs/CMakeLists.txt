@@ -2,9 +2,10 @@ cmake_minimum_required(VERSION 3.14)
 project(guest-thunks)
 include(${FEX_PROJECT_SOURCE_DIR}/CMakeFiles/version_to_variables.cmake)
 
-option(ENABLE_CLANG_THUNKS "Enable building thunks with clang" FALSE)
+# TODO: This is also mentioned in the toolchain files...
+option(ENABLE_CLANG_CROSSCOMPILING "Use clang for cross-compiling" TRUE)
 
-if (ENABLE_CLANG_THUNKS)
+if (ENABLE_CLANG_CROSSCOMPILING)
   set (LD_OVERRIDE "-fuse-ld=lld")
   add_link_options(${LD_OVERRIDE})
 endif()
