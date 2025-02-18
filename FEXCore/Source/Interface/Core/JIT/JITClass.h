@@ -42,6 +42,9 @@ public:
   CompileCode(uint64_t Entry, uint64_t Size, bool SingleInst, const FEXCore::IR::IRListView* IR, FEXCore::Core::DebugData* DebugData,
               const FEXCore::IR::RegisterAllocationData* RAData, bool CheckTF) override;
 
+  [[nodiscard]]
+  void* RelocateJITObjectCode(uint64_t Entry, std::span<const char> HostCode, std::span<const Relocation> Relocations) override;
+
   void ClearCache() override;
 
   void ClearRelocations() override {
@@ -317,7 +320,7 @@ private:
   fextl::vector<FEXCore::CPU::Relocation> Relocations;
 
   ///< Relocation code loading
-  bool ApplyRelocations(uint64_t GuestEntry, uint64_t CodeEntry, uint64_t CursorEntry, size_t NumRelocations, const char* EntryRelocations);
+  bool ApplyRelocations(uint64_t GuestEntry, uint64_t CodeEntry, uint64_t CursorEntry, std::span<const Relocation> EntryRelocations);
 
   /**  @} */
 
