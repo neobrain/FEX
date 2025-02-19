@@ -198,6 +198,9 @@ namespace CPU {
       // The length of the guest code for this block.
       size_t GuestSize;
 
+      // If this block represents a single guest instruction.
+      bool SingleInst;
+
       // Number of RIP entries for this JIT Code section.
       uint32_t NumberOfRIPEntries;
 
@@ -207,10 +210,7 @@ namespace CPU {
       // Shared-code modification spin-loop futex.
       uint32_t SpinLockFutex;
 
-      // If this block represents a single guest instruction.
-      bool SingleInst;
-
-      uint8_t _Pad[3];
+      uint32_t _Pad;
     };
 
     /**
