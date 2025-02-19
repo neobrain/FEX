@@ -33,7 +33,7 @@ void Arm64JITCore::InsertNamedThunkRelocation(ARMEmitter::Register Reg, const IR
 
   uint64_t Pointer = reinterpret_cast<uint64_t>(EmitterCTX->ThunkHandler->LookupThunk(Sum));
 
-  LoadConstant(ARMEmitter::Size::i64Bit, Reg, Pointer, EmitterCTX->Config.CacheObjectCodeCompilation());
+  LoadConstant(ARMEmitter::Size::i64Bit, Reg, Pointer, /*EmitterCTX->Config.CacheObjectCodeCompilation()*/ true);
   Relocations.emplace_back(MoveABI);
 }
 
