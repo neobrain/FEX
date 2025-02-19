@@ -31,6 +31,7 @@ $end_info$
 #include <FEXCore/Utils/EnumUtils.h>
 #include <FEXCore/Utils/Profiler.h>
 #include <FEXCore/HLE/SyscallHandler.h>
+#include <FEXCore/fextl/unordered_set.h>
 
 #include "Interface/Core/Interpreter/InterpreterOps.h"
 #include <capstone/capstone.h>
@@ -754,8 +755,10 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
   this->DebugData = DebugData;
   this->IR = IR;
 
+  const auto CursorTop = GetCursorOffset();
+
   // Fairly excessive buffer range to make sure we don't overflow
-  uint32_t BufferRange = SSACount * 16;
+  uint32_t BufferRange = SSACount * 32;
   if ((GetCursorOffset() + BufferRange) > CurrentCodeBuffer->Size) {
     CTX->ClearCodeCache(ThreadState);
   }
@@ -974,22 +977,67 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
     write(CodeDumpFD, Output.data(), Output.size());
   }
 
+  fextl::unordered_map<uint64_t, std::string> RelocatedInstrs;
+  const uint64_t NeutralGuestBase = 0x123000;
+
+  const auto OldCursor = GetCursorOffset();
+  memcpy(GetCursorAddress<void*>(), CompiledCode.BlockBegin, CompiledCode.Size);
+  for (auto& Reloc : Relocations) {
+    switch (Reloc.Header.Type) {
+    case FEXCore::CPU::RelocationTypes::RELOC_NAMED_SYMBOL_LITERAL: {
+      if (Reloc.NamedSymbolLiteral.Symbol != RelocNamedSymbolLiteral::NamedSymbol::SYMBOL_LITERAL_EXITFUNCTION_LINKER) {
+        ERROR_AND_DIE_FMT("Unknown named literal symbol");
+      }
+      RelocatedInstrs.emplace(Reloc.NamedSymbolLiteral.Offset, "EXITFUNCTION_LINKER");
+      SetCursorOffset(OldCursor + Reloc.NamedSymbolLiteral.Offset);
+      dc64(0);
+      break;
+    }
+
+    case FEXCore::CPU::RelocationTypes::RELOC_NAMED_THUNK_MOVE: {
+      RelocatedInstrs.emplace(Reloc.NamedThunkMove.Offset, "THUNK");
+      SetCursorOffset(OldCursor + Reloc.NamedThunkMove.Offset);
+      LoadConstant(ARMEmitter::Size::i64Bit, ARMEmitter::Register(Reloc.NamedThunkMove.RegisterIndex), 0, true);
+      break;
+    }
+    case FEXCore::CPU::RelocationTypes::RELOC_GUEST_RIP_MOVE: {
+      uint64_t Pointer = Reloc.GuestRIPMove.GuestRIP + NeutralGuestBase;
+      RelocatedInstrs.emplace(Reloc.GuestRIPMove.Offset, fextl::fmt::format("= LOAD VALUE GUEST_OFFSET {:#x}", Reloc.GuestRIPMove.GuestRIP));
+      SetCursorOffset(OldCursor + Reloc.GuestRIPMove.Offset);
+      LoadConstant(ARMEmitter::Size::i64Bit, ARMEmitter::Register(Reloc.GuestRIPMove.RegisterIndex), Pointer, true);
+      break;
+    }
+
+    case FEXCore::CPU::RelocationTypes::RELOC_GUEST_RIP_LITERAL: {
+      RelocatedInstrs.emplace(Reloc.GuestRIPMove.Offset, fextl::fmt::format("= GUEST_OFFSET {:#x}", Reloc.GuestRIPMove.GuestRIP));
+      SetCursorOffset(OldCursor + Reloc.GuestRIPMove.Offset);
+      dc64(NeutralGuestBase + Reloc.GuestRIPMove.GuestRIP);
+      break;
+    }
+    default: ERROR_AND_DIE_FMT("Unknown relocation type {}", ToUnderlying(Reloc.Header.Type));
+    }
+  }
+  SetCursorOffset(OldCursor);
+
   {
     csh handle;
     cs_open(CS_ARCH_ARM64, CS_MODE_ARM, &handle);
     // TODO: Thread-safety
     // TODO: Include JIT preamble
-    auto PCToDecode = (const uint32_t*)CompiledCode.BlockEntry;
+    auto PCToDecode = (const uint32_t*)(GetCursorAddress<char*>() + (CompiledCode.BlockEntry - CompiledCode.BlockBegin));
     cs_insn* insn = cs_malloc(handle);
-    for (uint64_t Offset = 0; PCToDecode < (const uint32_t*)(CompiledCode.BlockBegin + CompiledCode.Size); Offset += 4, ++PCToDecode) {
+    for (uint64_t Offset = 0; PCToDecode < (const uint32_t*)(GetCursorAddress<char*>() + CompiledCode.Size);
+         Offset += 4, ++PCToDecode) {
       const uint8_t* current = (const uint8_t*)PCToDecode;
       size_t size = 4;
-      uint64_t address = 0x123000;
+      uint64_t address = NeutralGuestBase;
       fextl::string Output;
       if (cs_disasm_iter(handle, &current, &size, &address, insn)) {
-        Output = fextl::fmt::format("+{:08x}: {:08x} {} {}\n", Offset, *PCToDecode, insn->mnemonic, insn->op_str);
+        Output = fextl::fmt::format("+{:08x}: {:08x} {} {}{}\n", Offset, *PCToDecode, insn->mnemonic, insn->op_str,
+                                    RelocatedInstrs.contains(Offset) ? (" <-- RELOCATED " + RelocatedInstrs.at(Offset)) : "");
       } else {
-        Output = fextl::fmt::format("+{:08x}: {:08x} (unknown instruction)\n", Offset, *PCToDecode);
+        Output = fextl::fmt::format("+{:08x}: {:08x} (unknown instruction){}\n", Offset, *PCToDecode,
+                                    RelocatedInstrs.contains(Offset) ? (" <-- RELOCATED " + RelocatedInstrs.at(Offset)) : "");
       }
       write(CodeDumpFD, Output.data(), Output.size());
     }
