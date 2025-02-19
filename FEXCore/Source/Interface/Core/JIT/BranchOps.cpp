@@ -60,18 +60,22 @@ DEF_OP(ExitFunction) {
       br(TMP2);
     } else {
 #endif
-      ARMEmitter::ForwardLabel l_BranchHost;
-      ldr(TMP1, &l_BranchHost);
+      // ARMEmitter::ForwardLabel l_BranchHost;
+      auto l_BranchHost = InsertNamedSymbolLiteral(RelocNamedSymbolLiteral::NamedSymbol::SYMBOL_LITERAL_EXITFUNCTION_LINKER);
+      auto l_NewRIP = InsertGuestRIPLiteral(NewRIP);
+      ldr(TMP1, &l_BranchHost.Loc);
       blr(TMP1);
 
-      Bind(&l_BranchHost);
-      dc64(ThreadState->CurrentFrame->Pointers.Common.ExitFunctionLinker);
-      dc64(NewRIP);
+      PlaceNamedSymbolLiteral(l_BranchHost);
+      // Bind(&l_BranchHost);
+      // dc64(ThreadState->CurrentFrame->Pointers.Common.ExitFunctionLinker);
+      // dc64(NewRIP);
+      PlaceNamedSymbolLiteral(l_NewRIP);
 #ifdef _M_ARM_64EC
     }
 #endif
   } else {
-
+    // ERROR_AND_DIE_FMT("NOT IMPLEMENTED YET");
     ARMEmitter::ForwardLabel FullLookup;
     auto RipReg = GetReg(Op->NewRIP.ID());
 

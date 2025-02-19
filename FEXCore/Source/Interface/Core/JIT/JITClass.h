@@ -304,6 +304,9 @@ private:
    */
   NamedSymbolLiteralPair InsertNamedSymbolLiteral(FEXCore::CPU::RelocNamedSymbolLiteral::NamedSymbol Op);
 
+  // TODO: Docstring
+  NamedSymbolLiteralPair InsertGuestRIPLiteral(uint64_t GuestRIP);
+
   /**
    * @brief Place the named symbol literal relocation in memory
    *
