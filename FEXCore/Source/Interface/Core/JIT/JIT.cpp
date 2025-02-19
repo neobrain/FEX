@@ -767,8 +767,6 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
                                                    bool CheckTF) {
   FEXCORE_PROFILE_SCOPED("Arm64::CompileCode");
 
-  ERROR_AND_DIE_FMT("TODO: Compiling new code will overwrite CodeBuffer. Make sure to adjust the write cursor!");
-
   // TODO: Moved to CompileBlock for now
   // auto lock = allthesinglemutexes.AcquireLock();
   allthesinglemutexes.AssertIsLocked();

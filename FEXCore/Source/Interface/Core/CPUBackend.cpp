@@ -369,7 +369,7 @@ namespace CPU {
         // Keep a reference to the old code buffer to delay deallocation
         // TODO: Clear SignalHandlerCodeBuffers once SignalHandlerRefCounter reaches 0 again
         // TODO: Actually, this should be added when entering the signal handler...
-        // fprintf(stderr, "ADDING CodeBuffer reference for signal handle\n");
+        //fprintf(stderr, "ADDING CodeBuffer reference for signal handle\n");
         SignalHandlerCodeBuffers.push_back(Prev);
       } else {
         SignalHandlerCodeBuffers.clear();
@@ -490,7 +490,7 @@ namespace CPU {
     if (!Latest) {
       FEXTracyMessageL("Creating first CodeBuffer");
       // Made extra large to avoid resizing. TODO: Implement relocation of existing contents
-      AllocateNewCodeBuffer(1024 * 1024 * 128); // TODO: Use InitialCodeSize instead
+      AllocateNewCodeBuffer(1024 * 1024 * 17); // TODO: Use InitialCodeSize instead
     }
     return Latest;
   }

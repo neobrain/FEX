@@ -244,12 +244,6 @@ namespace CPU {
     [[nodiscard]]
     virtual void* RelocateJITObjectCode(uint64_t Entry, std::span<const char> HostCode, std::span<const Relocation> Relocations) = 0;
 
-    // TODO: Make pure virtual?
-    virtual const fextl::vector<FEXCore::CPU::Relocation>& GetRelocations() const {
-      ERROR_AND_DIE_FMT("Not implemented");
-      // return {};
-    };
-
     virtual void ClearCache() {}
 
     /**

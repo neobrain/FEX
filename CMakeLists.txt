@@ -39,12 +39,6 @@ set (X86_64_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/toolchain_x86_64.cmake" 
 set (X86_DEV_ROOTFS "/" CACHE FILEPATH "Path to the sysroot used for cross-compiling for i686 and x86_64")
 set (DATA_DIRECTORY "${CMAKE_INSTALL_PREFIX}/share/fex-emu" CACHE PATH "global data directory")
 
-if (TRUE) # TODO: Add hardening option
-  # Selected subset from gcc's -fhardened
-  # TODO: In Debug builds, FORTIFY_SOURCE must not be used (since it requires optimization)
-  set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_FORTIFY_SOURCE=3 -D_GLIBCXX_ASSERTIONS -ftrivial-auto-var-init=zero -fstack-protector-strong -fstack-clash-protection")
-endif ()
-
 string(FIND ${CMAKE_BASE_NAME} mingw CONTAINS_MINGW)
 if (NOT CONTAINS_MINGW EQUAL -1)
   message (STATUS "Mingw build")

@@ -5,7 +5,6 @@
 
 #include <Common/AsyncNet.h>
 #include <Common/FEXServerClient.h>
-#include <FEXCore/Utils/EnumUtils.h>
 
 #include <fmt/ranges.h>
 
@@ -19,14 +18,6 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <vector>
-
-
-#include "Tools/FEXLoader/ELFCodeLoader.h"
-#include "Linux/Utils/ELFParser.h"
-#include "FEXCore/Core/Context.h"
-#include "Common/HostFeatures.h"
-// #include "DummyHandlers.h"
-#include "Tools/LinuxEmulation/LinuxSyscalls/x64/Syscalls.h"
 
 namespace ProcessPipe {
 constexpr int USER_PERMS = S_IRWXU | S_IRWXG | S_IRWXO;
@@ -267,67 +258,13 @@ void SendFDSuccessPacket(fasio::tcp_socket& Socket, int FD) {
   write(Socket, Data, ec);
 }
 
-void GenerateCodeCache(int FD) {
-  std::unique_ptr<FEXCore::Context::Context> CTX;
-  bool SupportsAVX {};
-  {
-    auto HostFeatures = FEX::FetchHostFeatures();
-    CTX = FEXCore::Context::Context::CreateNewContext(HostFeatures);
-    SupportsAVX = HostFeatures.SupportsAVX;
-  }
-
-  // TODO: SetupTSOEmulation (changes codegen)
-
-  ELFCodeLoader Loader {"", FD, "", {"WillBeDropped"}, {}};
-  // if (!Loader.Is64BitMode()) {
-  //   // Tell the kernel we want to use the compat input syscalls even though we're
-  //   // a 64 bit process.
-  //   FEX::CompatInput::SetupCompatInput(true);
-  // } else {
-  //   // Our parent could be an instance running a 32 bit application, so we need
-  //   // to disable compat input if we're running a 64 bit one ourselves.
-  //   FEX::CompatInput::SetupCompatInput(false);
-  // }
-
-  {
-    // Loader.SetVDSOBase(VDSOMapping.VDSOBase);
-    // Loader.CalculateHWCaps(CTX.get());
-
-    auto SyscallHandler =                                                                                      /*Loader.Is64BitMode() ?*/
-      FEX::HLE::x64::CreateHandler(CTX.get(), /*SignalDelegation.get(), ThunkHandler.get()*/ nullptr, nullptr) //:
-      // FEX::HLE::x32::CreateHandler(CTX.get(), SignalDelegation.get(), ThunkHandler.get(), std::move(Allocator))
-      ;
-
-    if (!Loader.MapMemory(SyscallHandler.get())) {
-      // failed to map
-      LogMan::Msg::EFmt("Failed to map {}-bit elf file.", Loader.Is64BitMode() ? 64 : 32);
-      return;
-    }
-  }
-
-  if (!CTX->InitCore()) {
-    LogMan::Msg::EFmt("Failed to init core");
-    return;
-  }
-
-  // ELFParser Elf;
-  // Elf.ReadElf(dup(FD)); // duplicate FD since ReadElf will close it
-
-  for (auto& Section : Loader.Sections) {
-    // FEX::AOT::AOTGenSection(CTX.get(), Section);
-  }
-}
-
 void HandleSocketData(fasio::tcp_socket& Socket) {
   std::vector<uint8_t> Data(1500);
 
   // Get the current number of FDs of the process before we start handling sockets.
   GetMaxFDs();
 
-  // fasio::mutable_buffer buffer = {std::as_writable_bytes(std::span(Data))};
-  fasio::mutable_buffer buffer = {std::as_writable_bytes(std::span(Data).subspan(0, 4))};
-  int inFD = -1;
-  buffer.FD = &inFD;
+  fasio::mutable_buffer buffer = {std::as_writable_bytes(std::span(Data))};
 
   {
     fasio::error ec;
@@ -336,10 +273,10 @@ void HandleSocketData(fasio::tcp_socket& Socket) {
     if (ec == fasio::error::success) {
       assert(Read >= sizeof(FEXServerClient::FEXServerRequestPacket));
       buffer = {buffer.Data.subspan(0, Read)};
-    } else if (ec == fasio::error::generic_errno) {
-      perror("read");
+    } else if (ec == fasio::error::eof) {
       return;
     } else {
+      perror("read");
       return;
     }
   }
@@ -426,32 +363,6 @@ void HandleSocketData(fasio::tcp_socket& Socket) {
         close(FD);
       }
 
-      buffer += sizeof(FEXServerClient::FEXServerRequestPacket::Header);
-      break;
-    }
-
-    case FEXServerClient::PacketType::TYPE_QUERY_CODE_CACHE: {
-      // fasio::mutable_buffer FDBuffer;
-      // int ProgramFD = -1;
-      // FDBuffer.FD = &ProgramFD;
-      // fasio::error ec;
-      // read(Socket, FDBuffer, ec);
-      // if (ec != fasio::error::success) {
-      //   ERROR_AND_DIE_FMT("BLA");
-      // }
-
-      GenerateCodeCache(inFD);
-
-
-      FEXServerClient::FEXServerResultPacket Res {
-        .Header {
-          .Type = FEXServerClient::PacketType::TYPE_SUCCESS,
-        },
-      };
-
-      fasio::mutable_buffer Data = {.Data = std::as_writable_bytes(std::span(&Res, 1)), .FD = &inFD};
-      fasio::error ec;
-      write(Socket, Data, ec);
       buffer += sizeof(FEXServerClient::FEXServerRequestPacket::Header);
       break;
     }

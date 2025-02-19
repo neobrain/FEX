@@ -182,19 +182,6 @@ FEXCore::HLE::AOTIRCacheEntryLookupResult SyscallHandler::LookupAOTIRCacheEntry(
   return {Entry->second.Resource ? Entry->second.Resource->AOTIRCacheEntry : nullptr, Entry->second.Base - Entry->second.Offset};
 }
 
-void SyscallHandler::ForEachVMAMapping(FEXCore::Core::InternalThreadState* Thread, std::function<void(uint64_t)> Func) {
-  // TODO: Disabled while load-full-cache-on-load is enabled
-  // auto lk = FEXCore::/*GuardSignalDeferringSection*/ GuardSignalDeferringSectionWithFallback<std::shared_lock>(VMATracking.Mutex, Thread);
-
-  for (const auto& [Base, Entry] : VMATracking.VMAs) {
-    if (Entry.Prot.Executable) {
-      fmt::print(stderr, "Visiting VMA entry {:#x} / {:#x}: {}\n", Base, Entry.Base - Entry.Offset,
-                 *((fextl::string*)((char*)Entry.Resource->AOTIRCacheEntry + 32)) /* FileId */);
-      Func(Entry.Base - Entry.Offset);
-    }
-  }
-}
-
 // MMan Tracking
 void SyscallHandler::TrackMmap(FEXCore::Core::InternalThreadState* Thread, uintptr_t Base, uintptr_t Size, int Prot, int Flags, int fd,
                                off_t Offset) {
@@ -204,12 +191,6 @@ void SyscallHandler::TrackMmap(FEXCore::Core::InternalThreadState* Thread, uintp
     CTX->MarkMemoryShared(Thread);
   }
 
-  bool IsNewLibrary = false;
-  MappedResource* Resource = nullptr;
-  // ELFParser Elf;
-
-  fextl::string Filename;
-
   {
     // NOTE: Frontend calls this with a nullptr Thread during initialization, but
     //       providing this code with a valid Thread object earlier would allow
@@ -217,6 +198,8 @@ void SyscallHandler::TrackMmap(FEXCore::Core::InternalThreadState* Thread, uintp
     auto lk = FEXCore::GuardSignalDeferringSectionWithFallback(VMATracking.Mutex, Thread);
 
     static uint64_t AnonSharedId = 1;
+
+    MappedResource* Resource = nullptr;
 
     if (!(Flags & MAP_ANONYMOUS)) {
       struct stat64 buf;
@@ -232,14 +215,7 @@ void SyscallHandler::TrackMmap(FEXCore::Core::InternalThreadState* Thread, uintp
         Resource = &Iter->second;
 
         if (Inserted) {
-          // Resource->AOTIRCacheEntry = CTX->LoadAOTIRCacheEntry(fextl::string(Tmp, PathLength));
-          Filename = fextl::string(Tmp, PathLength);
-          // // TODO: Suppress or fix logging errors for non-ELF files
-          // Elf.ReadElf(Filename);
-
-          fmt::print(stderr, "Loading object {}\n", Filename);
-
-          IsNewLibrary = true;
+          Resource->AOTIRCacheEntry = CTX->LoadAOTIRCacheEntry(fextl::string(Tmp, PathLength));
           Resource->Iterator = Iter;
         }
       }
@@ -260,18 +236,6 @@ void SyscallHandler::TrackMmap(FEXCore::Core::InternalThreadState* Thread, uintp
   if (SMCChecks != FEXCore::Config::CONFIG_SMC_NONE) {
     // VMATracking.Mutex can't be held while executing this, otherwise it hangs if the JIT is in the process of looking up code in the AOT JIT.
     _SyscallHandler->TM.InvalidateGuestCodeRange(Thread, (uintptr_t)Base, Size);
-  }
-
-
-  if (IsNewLibrary) {
-    fextl::fmt::print(stderr, "LOADING AOT CACHE ENTRY: {}\n", Filename);
-    // TODO: Identify via ELF build id instead
-    Resource->AOTIRCacheEntry = CTX->LoadAOTIRCacheEntry(std::move(Filename) /*Thread, Base, std::move(Filename), std::move(Elf.BuildID)*/);
-    if (Thread) {
-      CTX->FetchAOTIRCacheEntry(Thread, Base);
-    } else {
-      fmt::print(stderr, "SKIPPING ENTRY PREFETCH SINCE NO THREAD EXISTS YET\n");
-    }
   }
 }
 

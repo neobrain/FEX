@@ -17,18 +17,6 @@
 
 namespace FEX::AOT {
 void AOTGenSection(FEXCore::Context::Context* CTX, ELFCodeLoader::LoadedSection& Section) {
-  // TODO: Constrain to specific object more cleanly
-  // TODO: Ensure cross-section jumps are always long!
-
-  fmt::print(stderr, "Running AOT gen for {}\n", Section.Filename);
-  auto off = Section.Filename.find_last_of('/');
-  auto full_ext = (off == std::string::npos) ? Section.Filename.end() : (Section.Filename.begin() + off);
-  full_ext = std::find(full_ext, Section.Filename.end(), '.');
-  if (std::string_view {full_ext, Section.Filename.end()}.starts_with(".so")) {
-    fmt::print(stderr, "Skipping\n");
-    return;
-  }
-
   // Make sure this section is executable and big enough
   if (!Section.Executable || Section.Size < 16) {
     return;
@@ -150,11 +138,13 @@ void AOTGenSection(FEXCore::Context::Context* CTX, ELFCodeLoader::LoadedSection&
         ExternalBranchesLocal.clear();
       }
 
-      // Write cache to disk. Existing files are atomically replaced
-      int fd = ::open("/tmp/fexcache.new", O_WRONLY | O_TRUNC);
-      CTX->FinalizeAOTIRCache(*Thread, fd);
-      close(fd);
-      ::rename("/tmp/fexcache.new", "/tmp/fexcache");
+      // Thread->CPUBackend.get()
+
+      // Thread->LookupCache;
+
+      // TODO: Dump LookupCache to file (through new CPUBackend interface?)
+      // TODO: Dump CodeBuffer to file (through new CPUBackend interface?)
+
 
       // All entryproints processed, cleanup this thread
       CTX->DestroyThread(Thread);

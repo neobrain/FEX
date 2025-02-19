@@ -322,8 +322,6 @@ private:
   ///< Relocation code loading
   bool ApplyRelocations(uint64_t GuestEntry, uint64_t CodeEntry, uint64_t CursorEntry, std::span<const Relocation> EntryRelocations);
 
-  const fextl::vector<FEXCore::CPU::Relocation>& GetRelocations() const override;
-
   /**  @} */
 
   uint32_t SpillSlots {};
