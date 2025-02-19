@@ -176,4 +176,9 @@ bool Arm64JITCore::ApplyRelocations(uint64_t GuestEntry, uint64_t CodeEntry, uin
 
   return true;
 }
+
+const fextl::vector<FEXCore::CPU::Relocation>& Arm64JITCore::GetRelocations() const {
+  return Relocations;
+}
+
 } // namespace FEXCore::CPU

@@ -290,7 +290,7 @@ static int StealFEXFDFromEnv(const char* Env) {
   return FEXFD;
 }
 
-int main(int argc, char** argv, char** const envp) {
+int main(int argc, char** argv, char** const envp) try {
   auto SBRKPointer = FEXCore::Allocator::DisableSBRKAllocations();
   FEXCore::Allocator::GLIBCScopedFault GLIBFaultScope;
 
@@ -345,6 +345,11 @@ int main(int argc, char** argv, char** const envp) {
     LogMan::Msg::EFmt("FEXServerClient: Failure to setup client");
     return -1;
   }
+
+  std::set_terminate([]() {
+    fextl::fmt::print(stderr, "TERMINATE HANDLER\n");
+    ERROR_AND_DIE_FMT("TERMINATE HANDLER");
+  });
 
   FEX_CONFIG_OPT(SilentLog, SILENTLOG);
   FEX_CONFIG_OPT(AOTIRCapture, AOTIRCAPTURE);
@@ -537,6 +542,12 @@ int main(int argc, char** argv, char** const envp) {
     SyscallHandler->FM.TrackFEXFD(FEXServerLogging::FEXServerFD);
   }
 
+  // {
+  //   int ProgramFD = Loader.GetMainElfFD();
+  //   auto CacheFD = FEXServerClient::RequestCodeCache(FEXServerClient::GetServerFD(), ProgramFD);
+  //   ERROR_AND_DIE_FMT("TODO: Implement cache loading logic");
+  // }
+
   {
     Loader.SetVDSOBase(VDSOMapping.VDSOBase);
     Loader.CalculateHWCaps(CTX.get());
@@ -579,6 +590,23 @@ int main(int argc, char** argv, char** const envp) {
 
   SyscallHandler->DeserializeSeccompFD(ParentThread, FEXSeccompFD);
 
+  // Load AOT cache for all objects loaded previously
+  // NOTE: FetchAOTIRCacheEntry has a special case for addr == 0
+  CTX->FetchAOTIRCacheEntry(ParentThread->Thread, 0);
+  FEX_CONFIG_OPT(SMCChecks, SMCCHECKS);
+  if (SMCChecks() != FEXCore::Config::CONFIG_SMC_NONE) {
+    // After having preloading the disk cache, ld.so will probably trigger this when applying ELF relocations
+    ERROR_AND_DIE_FMT("TODO: SMC not supported at the moment");
+  }
+  // if (true) {
+  //   fextl::unordered_map<fextl::string, FEXCore::IR::AOTIRCacheEntry> AOTCache;
+  //   for (auto& Resource : AOTCache) {
+  //     auto Base = TODO;
+  //     CTX->FetchAOTIRCacheEntry(ParentThread, Base);
+  //   }
+  // }
+
+
   const bool AOTEnabled = AOTIRLoad() || AOTIRCapture() || AOTIRGenerate();
   if (AOTEnabled) {
     LogMan::Msg::IFmt("Warning: AOTIR is experimental, and might lead to crashes. "
@@ -611,10 +639,23 @@ int main(int argc, char** argv, char** const envp) {
     });
   }
 
-  if (AOTIRGenerate()) {
+  if (AOTIRGenerate() || false) {
+    fmt::print(stderr, "Running AOT...\n");
     for (auto& Section : Loader.Sections) {
       FEX::AOT::AOTGenSection(CTX.get(), Section);
     }
+
+    FHU::Filesystem::CreateDirectories("/tmp/fexcache");
+    // TODO: Consider O_EXCL so that this fails to overwrite existing files?
+    int fd = open(fextl::fmt::format("/tmp/fexcache/{}", Program.ProgramName).c_str(), O_CREAT | O_WRONLY, 0644);
+    CTX->FinalizeAOTIRCache(*ParentThread->Thread, fd);
+    LogMan::Msg::IFmt("AOTIR Cache Stored");
+    close(fd);
+
+
+    fmt::print(stderr, "... done running AOT. Waiting for CTRL+C\n");
+    while (true) {};
+    // ERROR_AND_DIE_FMT("All good, terminating for debugging now");
   } else {
     CTX->ExecuteThread(ParentThread->Thread);
   }
@@ -635,8 +676,11 @@ int main(int argc, char** argv, char** const envp) {
     }
 
     if (AOTIRCapture() || AOTIRGenerate()) {
-      CTX->FinalizeAOTIRCache();
-      LogMan::Msg::IFmt("AOTIR Cache Stored");
+      // FHU::Filesystem::CreateDirectories("/tmp/fexcache");
+      // // TODO: Consider O_EXCL so that this fails to overwrite existing files?
+      // int fd = open(fextl::fmt::format("/tmp/fexcache/{}", Program.ProgramName).c_str(), O_CREAT | O_WRONLY);
+      // CTX->FinalizeAOTIRCache(*ParentThread->Thread, fd);
+      // LogMan::Msg::IFmt("AOTIR Cache Stored");
     }
   }
 
@@ -671,4 +715,8 @@ int main(int argc, char** argv, char** const envp) {
   FEXCore::Allocator::ReenableSBRKAllocations(SBRKPointer);
 
   return ProgramStatus;
+} catch (...) {
+  fextl::fmt::print("Uncaught exception!");
+  ERROR_AND_DIE_FMT("UNCAUGHT EXCEPTION");
+  throw;
 }

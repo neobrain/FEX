@@ -779,7 +779,10 @@ SyscallHandler::SyscallHandler(FEXCore::Context::Context* _CTX, FEX::HLE::Signal
   GuestKernelVersion = CalculateGuestKernelVersion();
   Alloc32Handler = FEX::HLE::Create32BitAllocator();
 
-  SignalDelegation->RegisterHostSignalHandler(SIGSEGV, HandleSegfault, true);
+  // TODO: Drop AOT hack
+  if (SignalDelegation) {
+    SignalDelegation->RegisterHostSignalHandler(SIGSEGV, HandleSegfault, true);
+  }
 }
 
 SyscallHandler::~SyscallHandler() {

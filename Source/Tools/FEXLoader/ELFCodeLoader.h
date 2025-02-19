@@ -351,6 +351,10 @@ public:
     uint64_t val;
   };
 
+  int GetMainElfFD() const {
+    return MainElf.fd;
+  }
+
   bool MapMemory(FEX::HLE::SyscallHandler* const Handler) {
     for (const auto& Header : MainElf.phdrs) {
       if (Header.p_type == PT_GNU_STACK) {

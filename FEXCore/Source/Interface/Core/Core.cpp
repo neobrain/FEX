@@ -29,6 +29,7 @@ $end_info$
 #include "Utils/Allocator/HostAllocator.h"
 #include "Utils/SpinWaitLock.h"
 #include "Utils/variable_length_integer.h"
+#include "git_version.h"
 
 #include <FEXCore/Config/Config.h>
 #include <FEXCore/Core/Context.h>
@@ -49,6 +50,7 @@ $end_info$
 #include <FEXCore/fextl/fmt.h>
 #include <FEXCore/fextl/memory.h>
 #include <FEXCore/fextl/set.h>
+#include <FEXCore/fextl/unordered_set.h>
 #include <FEXCore/fextl/sstream.h>
 #include <FEXCore/fextl/vector.h>
 #include <FEXHeaderUtils/Syscalls.h>
@@ -381,7 +383,10 @@ bool ContextImpl::InitCore() {
   Dispatcher->GetSRAFPRMapping(SignalConfig.SRAFPRMapping);
 
   // Give this configuration to the SignalDelegator.
-  SignalDelegation->SetConfig(SignalConfig);
+  // TODO: Drop AOT hack
+  if (SignalDelegation) {
+    SignalDelegation->SetConfig(SignalConfig);
+  }
 
 #ifndef _WIN32
 #elif !defined(_M_ARM_64EC)
@@ -510,6 +515,8 @@ void ContextImpl::ClearCodeCache(FEXCore::Core::InternalThreadState* Thread, boo
     // Use the thread's object cache ref counter for this
     CodeSerialize::CodeObjectSerializeService::WaitForEmptyJobQueue(&Thread->ObjectCacheRefCounter);
   }
+
+  ERROR_AND_DIE_FMT("TODO: Code cache is not expected to be cleared while testing disk code caching");
 
   if (NewCodeBuffer) {
     // NOTE: Holding on to the reference here is required to ensure validity of the WriteLock mutex
@@ -751,22 +758,22 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
 }
 
 ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalThreadState* Thread, uint64_t GuestRIP, uint64_t MaxInst) {
-  // JIT Code object cache lookup
-  if (CodeObjectCacheService) {
-    auto CodeCacheEntry = CodeObjectCacheService->FetchCodeObjectFromCache(GuestRIP);
-    if (CodeCacheEntry) {
-      auto CompiledCode = Thread->CPUBackend->RelocateJITObjectCode(GuestRIP, CodeCacheEntry);
-      if (CompiledCode) {
-        return {
-          .CompiledCode = CompiledCode,
-          .DebugData = nullptr, // nullptr here ensures that code serialization doesn't occur on from cache read
-          .StartAddr = 0,       // Unused
-          .Length = 0,          // Unused
-          .CodeBufferLock {}    // Unused
-        };
-      }
-    }
-  }
+  // // JIT Code object cache lookup
+  // if (CodeObjectCacheService) {
+  //   auto CodeCacheEntry = CodeObjectCacheService->FetchCodeObjectFromCache(GuestRIP);
+  //   if (CodeCacheEntry) {
+  //     auto CompiledCode = Thread->CPUBackend->RelocateJITObjectCode(GuestRIP, CodeCacheEntry);
+  //     if (CompiledCode) {
+  //       return {
+  //         .CompiledCode = CompiledCode,
+  //         .DebugData = nullptr, // nullptr here ensures that code serialization doesn't occur on from cache read
+  //         .StartAddr = 0,       // Unused
+  //         .Length = 0,          // Unused
+  //         .CodeBufferLock {}    // Unused
+  //       };
+  //     }
+  //   }
+  // }
 
   if (SourcecodeResolver && Config.GDBSymbols()) {
     auto AOTIRCacheEntry = SyscallHandler->LookupAOTIRCacheEntry(Thread, GuestRIP);
@@ -803,6 +810,74 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
   };
 }
 
+void ContextImpl::FinalizeAOTIRCache(FEXCore::Core::InternalThreadState& Thread, int fd) {
+  auto CodeBuffer = GetCurrentCodeBuffer();
+  auto& LookupCache = *Thread.LookupCache->Shared;
+
+  const auto& Relocations = Thread.CPUBackend->GetRelocations();
+
+  // TODO: Verify source ELF is PIE, otherwise we'll need to factor in ELF relocations
+
+  // Write file header
+  // TODO: Include information about the cached object (base VA address etc)
+  //       TODO: Not clear if SMCTracking is currently aware of the main executable?
+  struct Header {
+    char Magic[4] = {'F', 'A', 'O', 'T'};
+    uint32_t FormatVersion = 1;
+    char FEXVersion[8] = {};
+    uint32_t NumBlocks;
+    uint32_t NumBlockLinks;
+    uint32_t CodeBufferSize;
+    uint32_t NumRelocations;
+  } header;
+  memcpy(&header.FEXVersion[0], GIT_SHORT_HASH, strlen(GIT_SHORT_HASH)); // TODO: Assert this is the correct length
+  header.NumBlocks = LookupCache.BlockList.size();
+  header.NumBlockLinks = LookupCache.BlockLinks->size();
+  header.CodeBufferSize = CodeBuffer->UsedSize;
+  header.NumRelocations = Relocations.size();
+  ::write(fd, &header, sizeof(header));
+
+  // Dump guest<->host block mappings
+  // TODO: Strip ASLR-dependence by relocating to base ELF offset
+  // TODO: Verify this all relates to the dumped ELF (and not any of its dependencies)
+  {
+    fextl::vector<decltype(LookupCache.BlockList)::value_type> BlockList {LookupCache.BlockList.begin(), LookupCache.BlockList.end()};
+    ::write(fd, BlockList.data(), sizeof(BlockList[0]) * BlockList.size());
+  }
+  for (auto& [Record, _] : *LookupCache.BlockLinks) {
+    // TODO: Consider if we need to serialize this data
+
+    // NOTE: This is assumed to always be a direct link, since indirect ones would likely point to a (different) shared library
+    // // TODO: Needs JIT interface to distinguish direct from indirect links
+    // ERROR_AND_DIE_FMT("TODO: Implement BlockLinks writing");
+    // auto Data = std::pair {Guest, Host};
+    // ::write(fd, &Data, sizeof(Data));
+  }
+
+  // Dump relocations
+  ::write(fd, Relocations.data(), Relocations.size() * sizeof(Relocations[0]));
+
+  // Pad to next page in file so that the CodeBuffer can be mmap'ed into process on load
+  char Zero[64] {};
+  auto Off = lseek(fd, 0, SEEK_CUR);
+  while (Off != AlignUp(Off, Utils::FEX_PAGE_SIZE)) {
+    auto BytesToWrite = std::min(AlignUp(Off, Utils::FEX_PAGE_SIZE) - Off, sizeof(Zero));
+    ::write(fd, Zero, BytesToWrite);
+    Off += BytesToWrite;
+  }
+
+  // Dump CodeBuffer to file
+  // TODO: Instead of dumping UsedSize, only dump the data belonging to the library!
+  ::write(fd, CodeBuffer->Ptr, CodeBuffer->UsedSize);
+
+
+  // TODO:
+  // Generate and dump separate "CodeMap" at runtime:
+  // * Code offsets not discovered statically
+  // * Code generated at runtime (if position-independent?)
+  // * Referenced libraries
+}
+
 uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_t GuestRIP, uint64_t MaxInst) {
   auto Thread = Frame->Thread;
   FEXCORE_PROFILE_SCOPED("CompileBlock");
@@ -810,6 +885,8 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
 
   // Invalidate might take a unique lock on this, to guarantee that during invalidation no code gets compiled
   auto lk = GuardSignalDeferringSection<std::shared_lock>(CodeInvalidationMutex, Thread);
+
+  // fextl::fmt::print(stderr, "Compiling code at {:#x}\n", GuestRIP);
 
   // Is the code in the cache?
   // The backends only check L1 and L2, not L3
@@ -866,7 +943,9 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
   }
 
   // Clear any relocations that might have been generated
-  Thread->CPUBackend->ClearRelocations();
+  if (/*TODO: Only when not AOT compiling */ false) {
+    Thread->CPUBackend->ClearRelocations();
+  }
 
   if (IRCaptureCache.PostCompileCode(Thread, CodePtr, GuestRIP, StartAddr, Length, {}, DebugData.get(), false)) {
     // Early exit
@@ -1025,6 +1104,108 @@ void ContextImpl::RemoveCustomIREntrypoint(uintptr_t Entrypoint) {
 IR::AOTIRCacheEntry* ContextImpl::LoadAOTIRCacheEntry(const fextl::string& filename) {
   auto rv = IRCaptureCache.LoadAOTIRCacheEntry(filename);
   return rv;
+}
+
+void ContextImpl::FetchAOTIRCacheEntry(FEXCore::Core::InternalThreadState* Thread, uintptr_t GuestRIP) {
+  if (!GuestRIP) {
+    fextl::unordered_set<uint64_t> Bases;
+    SyscallHandler->ForEachVMAMapping(Thread, [&Bases](uint64_t Base) { Bases.insert(Base); });
+    for (auto Base : Bases) {
+      FetchAOTIRCacheEntry(Thread, Base);
+    }
+    return;
+  }
+  auto GuestRIPLookup = SyscallHandler->LookupAOTIRCacheEntry(Thread, GuestRIP);
+  if (!GuestRIPLookup.Entry) {
+    // Skip cache
+  } else {
+    // auto OldCodeBuffer = Thread->CPUBackend->CurrentCodeBuffer;
+    // Thread->CPUBackend->AllocateAndSetCodeBufferForRegion(reinterpret_cast<uintptr_t>(GuestRIPLookup.Entry));
+    fextl::fmt::print(stderr, "LoadAll to {:#x} now {}\n", GuestRIP, GuestRIPLookup.Entry->FileId);
+
+
+    int fd = open(fextl::fmt::format("/tmp/fexcache/{}", "ls" /* TODO */).c_str(), O_RDONLY);
+
+    {
+      // TODO: Acquire write mutex?
+
+      auto CodeBuffer = GetCurrentCodeBuffer();
+      auto& LookupCache = *Thread->LookupCache->Shared;
+
+      // TODO: Verify source ELF is PIE, otherwise we'll need to factor in ELF relocations
+
+      // Read file header
+      struct Header {
+        char Magic[4] = {'F', 'A', 'O', 'T'};
+        uint32_t FormatVersion = 1;
+        char FEXVersion[8] = {};
+        uint32_t NumBlocks;
+        uint32_t NumBlockLinks;
+        uint32_t CodeBufferSize;
+        uint32_t NumRelocations;
+      } header;
+      memcpy(&header.FEXVersion[0], GIT_SHORT_HASH, strlen(GIT_SHORT_HASH));
+      ::read(fd, &header, sizeof(header));
+
+      char ExpectedVersion[8] = GIT_SHORT_HASH;
+      std::fill(std::begin(ExpectedVersion) + strlen(GIT_SHORT_HASH), std::end(ExpectedVersion), 0);
+      if (!std::equal(std::begin(header.FEXVersion), std::end(header.FEXVersion), std::begin(ExpectedVersion), std::end(ExpectedVersion))) {
+        fextl::fmt::print(stderr, "Version mismatch: {:02x} {:02x}\n", fmt::join(std::begin(header.FEXVersion), std::end(header.FEXVersion), ""),
+                          fmt::join(std::begin(ExpectedVersion), std::end(ExpectedVersion), ""));
+        ERROR_AND_DIE_FMT("Version mismatch");
+      }
+
+      // Read guest<->host block mappings
+      // TODO: Strip ASLR-dependence by relocating to base ELF offset
+      // TODO: Verify this all relates to the dumped ELF (and not any of its dependencies)
+      {
+        fextl::vector<decltype(LookupCache.BlockList)::value_type> BlockList(header.NumBlocks);
+        ::read(fd, BlockList.data(), sizeof(BlockList[0]) * BlockList.size());
+        LookupCache.BlockList.insert(BlockList.begin(), BlockList.end());
+      }
+
+      // TODO: De-serialize BlockLinks (if needed)
+
+      // ERROR_AND_DIE_FMT("TODO: Continue implementing this");
+
+      // Read relocations
+      fextl::vector<FEXCore::CPU::Relocation> Relocations(header.NumRelocations);
+      ::read(fd, Relocations.data(), Relocations.size() * sizeof(Relocations[0]));
+      // TODO: Store relocations in JIT for later re-relocation
+
+      // Pad to next page in file, which contains CodeBuffer data
+      char Zero[64] {};
+      auto Off = lseek(fd, 0, SEEK_CUR);
+      while (Off != AlignUp(Off, Utils::FEX_PAGE_SIZE)) {
+        auto BytesToWrite = std::min(AlignUp(Off, Utils::FEX_PAGE_SIZE) - Off, sizeof(Zero));
+        ::write(fd, Zero, BytesToWrite);
+        Off += BytesToWrite;
+      }
+
+      // Read CodeBuffer from file
+      // TODO: mmap this into memory instead
+      if (header.CodeBufferSize > CodeBuffer->Size) {
+        ERROR_AND_DIE_FMT("TODO: CodeBuffer too small to load initial cache");
+      }
+      ::read(fd, CodeBuffer->Ptr, header.CodeBufferSize);
+      CodeBuffer->UsedSize += header.CodeBufferSize;
+      // TODO: Move JIT write cursor
+
+      // Apply FEX relocations
+      // TODO: Change parameter to span<byte>
+      auto CompiledCode = Thread->CPUBackend->RelocateJITObjectCode(
+        GuestRIP, std::span {reinterpret_cast<const char*>(CodeBuffer->Ptr), CodeBuffer->UsedSize}, Relocations);
+
+      // TODO: Invalidate any pages that are affected by ELF relocations (and eventually add support for converting those relocations to FEX relocations)
+
+      fextl::fmt::print(stderr, "Loaded cache: {}-{} ({} relocs)\n", fmt::ptr(CodeBuffer->Ptr),
+                        fmt::ptr(CodeBuffer->Ptr + CodeBuffer->UsedSize), Relocations.size());
+    }
+    close(fd);
+
+    // new_cache.LoadAll(SyscallHandler, Thread, *this, GuestRIPLookup);
+    // Thread->CPUBackend->CurrentCodeBuffer = OldCodeBuffer;
+  }
 }
 
 void ContextImpl::UnloadAOTIRCacheEntry(IR::AOTIRCacheEntry* Entry) {

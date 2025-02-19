@@ -449,7 +449,8 @@ namespace CPU {
 #ifdef ENABLE_FEXCORE_PROFILER
       FEXTracyMessageL("Creating first CodeBuffer");
 #endif
-      AllocateNewCodeBuffer(1024 * 1024 * 16); // TODO: Use InitialCodeSize instead
+      // Made extra large to avoid resizing. TODO: Implement relocation of existing contents
+      AllocateNewCodeBuffer(1024 * 1024 * 128); // TODO: Use InitialCodeSize instead
     }
     return Latest;
   }
