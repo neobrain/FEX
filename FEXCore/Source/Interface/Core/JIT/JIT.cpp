@@ -33,11 +33,16 @@ $end_info$
 #include <FEXCore/HLE/SyscallHandler.h>
 
 #include "Interface/Core/Interpreter/InterpreterOps.h"
+#include <capstone/capstone.h>
 
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
 #include <limits>
+
+extern "C" {
+int CodeDumpFD = -1;
+}
 
 static constexpr size_t INITIAL_CODE_SIZE = 1024 * 1024 * 16;
 // We don't want to move above 128MB atm because that means we will have to encode longer jumps
@@ -960,6 +965,38 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
   }
 
   this->IR = nullptr;
+
+  auto GuestRIP = Entry;
+  auto& CompiledCode = CodeData;
+
+  {
+    auto Output = fextl::fmt::format("Guest block {:#x} -> {}:\n", GuestRIP, fmt::ptr(CompiledCode.BlockBegin));
+    write(CodeDumpFD, Output.data(), Output.size());
+  }
+
+  {
+    csh handle;
+    cs_open(CS_ARCH_ARM64, CS_MODE_ARM, &handle);
+    // TODO: Thread-safety
+    // TODO: Include JIT preamble
+    auto PCToDecode = (const uint32_t*)CompiledCode.BlockEntry;
+    cs_insn* insn = cs_malloc(handle);
+    for (uint64_t Offset = 0; PCToDecode < (const uint32_t*)(CompiledCode.BlockBegin + CompiledCode.Size); Offset += 4, ++PCToDecode) {
+      const uint8_t* current = (const uint8_t*)PCToDecode;
+      size_t size = 4;
+      uint64_t address = 0x123000;
+      fextl::string Output;
+      if (cs_disasm_iter(handle, &current, &size, &address, insn)) {
+        Output = fextl::fmt::format("+{:08x}: {:08x} {} {}\n", Offset, *PCToDecode, insn->mnemonic, insn->op_str);
+      } else {
+        Output = fextl::fmt::format("+{:08x}: {:08x} (unknown instruction)\n", Offset, *PCToDecode);
+      }
+      write(CodeDumpFD, Output.data(), Output.size());
+    }
+    cs_free(insn, 1);
+  }
+  write(CodeDumpFD, "\n", 1);
+
 
   return CodeData;
 }

@@ -53,6 +53,7 @@ $end_info$
 #include <FEXCore/fextl/vector.h>
 #include <FEXHeaderUtils/Syscalls.h>
 #include <FEXHeaderUtils/TodoDefines.h>
+#include <FEXHeaderUtils/Filesystem.h>
 
 #include <algorithm>
 #include <array>

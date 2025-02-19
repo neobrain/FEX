@@ -64,6 +64,10 @@ $end_info$
 #include <sys/sysinfo.h>
 #include <sys/signal.h>
 
+extern "C" {
+extern int CodeDumpFD;
+}
+
 namespace {
 static bool SilentLog {};
 static int OutputFD {STDERR_FILENO};
@@ -568,6 +572,9 @@ int main(int argc, char** argv, char** const envp) {
     return 1;
   }
 
+  FHU::Filesystem::CreateDirectories("/tmp/fexcode");
+  CodeDumpFD = open(fextl::fmt::format("/tmp/fexcode/{}.{}.bin", Program.ProgramName, ::getpid()).c_str(), O_CREAT | O_WRONLY, 0644);
+
   auto ParentThread = SyscallHandler->TM.CreateThread(Loader.DefaultRIP(), Loader.GetStackPointer());
   SyscallHandler->TM.TrackThread(ParentThread);
   SignalDelegation->RegisterTLSState(ParentThread);
@@ -618,6 +625,9 @@ int main(int argc, char** argv, char** const envp) {
   } else {
     CTX->ExecuteThread(ParentThread->Thread);
   }
+
+  LogMan::Msg::EFmt("Closing code dump FD");
+  close(CodeDumpFD);
 
   DebugServer.reset();
   SyscallHandler->TM.Stop();
