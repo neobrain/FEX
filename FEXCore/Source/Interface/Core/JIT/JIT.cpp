@@ -872,9 +872,8 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
   const uint64_t CodeOnlySize = GetCursorAddress<uint8_t*>() - CodeData.BlockBegin;
 
   // Add the JitCodeTail
-  auto JITBlockTailLocation = GetCursorAddress<uint8_t*>();
-  auto JITBlockTail = GetCursorAddress<JITCodeTail*>();
-  CursorIncrement(sizeof(JITCodeTail));
+  const auto JITBlockTailLocation = GetCursorAddress<uint8_t*>();
+  const auto JITBlockTail = GetCursorAddress<JITCodeTail*>();
 
   // Entries that live after the JITCodeTail.
   // These entries correlate JIT code regions with guest RIP regions.
@@ -892,17 +891,22 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
   //   FEXCore::Utils::vl64 GuestRIPOffset;
   // };
 
-  auto JITRIPEntriesBegin = GetCursorAddress<uint8_t*>();
-
   // Put the block's RIP entry in the tail.
   // This will be used for RIP reconstruction in the future.
-  // TODO: This needs to be a data RIP relocation once code caching works.
-  //   Current relocation code doesn't support this feature yet.
   JITBlockTail->RIP = Entry;
   JITBlockTail->GuestSize = Size;
   JITBlockTail->SingleInst = SingleInst;
   JITBlockTail->SpinLockFutex = 0;
 
+  {
+    auto PrevCur = GetCursorOffset();
+    CursorIncrement(offsetof(JITCodeTail, RIP));
+    auto RIPLiteral = InsertGuestRIPLiteral(JITBlockTail->RIP);
+    PlaceNamedSymbolLiteral(RIPLiteral);
+    SetCursorOffset(PrevCur + sizeof(JITCodeTail));
+  }
+
+  const auto JITRIPEntriesBegin = GetCursorAddress<uint8_t*>();
   auto JITRIPEntriesLocation = JITRIPEntriesBegin;
 
   {
@@ -1030,18 +1034,24 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
     // TODO: Include JIT preamble
     auto PCToDecode = (const uint32_t*)(GetCursorAddress<char*>() + (CompiledCode.BlockEntry - CompiledCode.BlockBegin));
     cs_insn* insn = cs_malloc(handle);
-    for (uint64_t Offset = 0; PCToDecode < (const uint32_t*)(GetCursorAddress<char*>() + CompiledCode.Size);
-         Offset += 4, ++PCToDecode) {
+    for (uint64_t Offset = 0; PCToDecode < (const uint32_t*)(GetCursorAddress<char*>() + CompiledCode.Size); Offset += 4, ++PCToDecode) {
+      fextl::string Output;
+      if (Offset == JITBlockTailLocation - CodeData.BlockBegin) {
+        Output += "JIT block tail:\n";
+      }
+
+      if (Offset == JITRIPEntriesBegin - CodeData.BlockBegin) {
+        Output += "JIT RIP entries:\n";
+      }
       const uint8_t* current = (const uint8_t*)PCToDecode;
       size_t size = 4;
       uint64_t address = NeutralGuestBase;
-      fextl::string Output;
       if (cs_disasm_iter(handle, &current, &size, &address, insn)) {
-        Output = fextl::fmt::format("+{:08x}: {:08x} {} {}{}\n", Offset, *PCToDecode, insn->mnemonic, insn->op_str,
-                                    RelocatedInstrs.contains(Offset) ? (" <-- RELOCATED " + RelocatedInstrs.at(Offset)) : "");
+        Output += fextl::fmt::format("+{:08x}: {:08x} {} {}{}\n", Offset, *PCToDecode, insn->mnemonic, insn->op_str,
+                                     RelocatedInstrs.contains(Offset) ? (" <-- RELOCATED " + RelocatedInstrs.at(Offset)) : "");
       } else {
-        Output = fextl::fmt::format("+{:08x}: {:08x} (unknown instruction){}\n", Offset, *PCToDecode,
-                                    RelocatedInstrs.contains(Offset) ? (" <-- RELOCATED " + RelocatedInstrs.at(Offset)) : "");
+        Output += fextl::fmt::format("+{:08x}: {:08x} (unknown instruction){}\n", Offset, *PCToDecode,
+                                     RelocatedInstrs.contains(Offset) ? (" <-- RELOCATED " + RelocatedInstrs.at(Offset)) : "");
       }
       write(CodeDumpFD, Output.data(), Output.size());
     }
