@@ -885,9 +885,8 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
   const uint64_t CodeOnlySize = GetCursorAddress<uint8_t*>() - CodeData.BlockBegin;
 
   // Add the JitCodeTail
-  auto JITBlockTailLocation = GetCursorAddress<uint8_t*>();
-  auto JITBlockTail = GetCursorAddress<JITCodeTail*>();
-  CursorIncrement(sizeof(JITCodeTail));
+  const auto JITBlockTailLocation = GetCursorAddress<uint8_t*>();
+  const auto JITBlockTail = GetCursorAddress<JITCodeTail*>();
 
   // Entries that live after the JITCodeTail.
   // These entries correlate JIT code regions with guest RIP regions.
@@ -905,17 +904,22 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
   //   FEXCore::Utils::vl64 GuestRIPOffset;
   // };
 
-  auto JITRIPEntriesBegin = GetCursorAddress<uint8_t*>();
-
   // Put the block's RIP entry in the tail.
   // This will be used for RIP reconstruction in the future.
-  // TODO: This needs to be a data RIP relocation once code caching works.
-  //   Current relocation code doesn't support this feature yet.
   JITBlockTail->RIP = Entry;
   JITBlockTail->GuestSize = Size;
   JITBlockTail->SingleInst = SingleInst;
   JITBlockTail->SpinLockFutex = 0;
 
+  {
+    auto PrevCur = GetCursorOffset();
+    CursorIncrement(offsetof(JITCodeTail, RIP));
+    auto RIPLiteral = InsertGuestRIPLiteral(JITBlockTail->RIP);
+    PlaceNamedSymbolLiteral(RIPLiteral);
+    SetCursorOffset(PrevCur + sizeof(JITCodeTail));
+  }
+
+  const auto JITRIPEntriesBegin = GetCursorAddress<uint8_t*>();
   auto JITRIPEntriesLocation = JITRIPEntriesBegin;
 
   {
