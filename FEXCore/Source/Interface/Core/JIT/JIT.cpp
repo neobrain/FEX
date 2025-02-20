@@ -976,16 +976,33 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
   auto GuestRIP = Entry;
   auto& CompiledCode = CodeData;
 
+  uint64_t NeutralGuestBase = 0x123000;
   {
     auto Region = CTX->SyscallHandler->LookupAOTIRCacheEntry(ThreadState, GuestRIP);
-    auto Output = fextl::fmt::format("Guest block +{:#x} in {} ({:#x} -> {}):\n", GuestRIP - Region.VAFileStart,
-                                     Region.Entry ? Region.Entry->Filename : "UNKNOWN", GuestRIP, fmt::ptr(CompiledCode.BlockBegin));
+    auto Output = fextl::fmt::format("Guest block +{:#x}-{:#x} in {} ({:#x} -> {}):\n", GuestRIP - Region.VAFileStart,
+                                     GuestRIP - Region.VAFileStart + Size, Region.Entry ? Region.Entry->Filename : "UNKNOWN", GuestRIP,
+                                     fmt::ptr(CompiledCode.BlockBegin));
+
+    NeutralGuestBase = GuestRIP - Region.VAFileStart;
 
     write(CodeDumpFD, Output.data(), Output.size());
   }
 
+  // Dump IR
+  if (false) {
+    fextl::stringstream ss;
+    FEXCore::IR::Dump(&ss, IR, RAData);
+    auto str = std::move(ss).str();
+    write(CodeDumpFD, str.data(), str.size());
+  }
+
+  // Dump raw guest x86 code
+  {
+    auto Output = fextl::fmt::format("{:02x}\n", fmt::join((uint8_t*)GuestRIP, (uint8_t*)GuestRIP + Size, ""));
+    write(CodeDumpFD, Output.data(), Output.size());
+  }
+
   fextl::unordered_map<uint64_t, std::string> RelocatedInstrs;
-  const uint64_t NeutralGuestBase = 0x123000;
 
   const auto OldCursor = GetCursorOffset();
   const auto PatchCursor = GetCursorOffset() + (CompiledCode.BlockEntry - CompiledCode.BlockBegin);
