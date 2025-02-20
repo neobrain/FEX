@@ -984,6 +984,7 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
   const uint64_t NeutralGuestBase = 0x123000;
 
   const auto OldCursor = GetCursorOffset();
+  const auto PatchCursor = GetCursorOffset() + (CompiledCode.BlockEntry - CompiledCode.BlockBegin);
   memcpy(GetCursorAddress<void*>(), CompiledCode.BlockBegin, CompiledCode.Size);
   for (auto& Reloc : Relocations) {
     switch (Reloc.Header.Type) {
@@ -992,28 +993,28 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
         ERROR_AND_DIE_FMT("Unknown named literal symbol");
       }
       RelocatedInstrs.emplace(Reloc.NamedSymbolLiteral.Offset, "EXITFUNCTION_LINKER");
-      SetCursorOffset(OldCursor + Reloc.NamedSymbolLiteral.Offset);
+      SetCursorOffset(PatchCursor + Reloc.NamedSymbolLiteral.Offset);
       dc64(0);
       break;
     }
 
     case FEXCore::CPU::RelocationTypes::RELOC_NAMED_THUNK_MOVE: {
       RelocatedInstrs.emplace(Reloc.NamedThunkMove.Offset, "THUNK");
-      SetCursorOffset(OldCursor + Reloc.NamedThunkMove.Offset);
+      SetCursorOffset(PatchCursor + Reloc.NamedThunkMove.Offset);
       LoadConstant(ARMEmitter::Size::i64Bit, ARMEmitter::Register(Reloc.NamedThunkMove.RegisterIndex), 0, true);
       break;
     }
     case FEXCore::CPU::RelocationTypes::RELOC_GUEST_RIP_MOVE: {
       uint64_t Pointer = Reloc.GuestRIPMove.GuestRIP + NeutralGuestBase;
       RelocatedInstrs.emplace(Reloc.GuestRIPMove.Offset, fextl::fmt::format("= LOAD VALUE GUEST_OFFSET {:#x}", Reloc.GuestRIPMove.GuestRIP));
-      SetCursorOffset(OldCursor + Reloc.GuestRIPMove.Offset);
+      SetCursorOffset(PatchCursor + Reloc.GuestRIPMove.Offset);
       LoadConstant(ARMEmitter::Size::i64Bit, ARMEmitter::Register(Reloc.GuestRIPMove.RegisterIndex), Pointer, true);
       break;
     }
 
     case FEXCore::CPU::RelocationTypes::RELOC_GUEST_RIP_LITERAL: {
       RelocatedInstrs.emplace(Reloc.GuestRIPMove.Offset, fextl::fmt::format("= GUEST_OFFSET {:#x}", Reloc.GuestRIPMove.GuestRIP));
-      SetCursorOffset(OldCursor + Reloc.GuestRIPMove.Offset);
+      SetCursorOffset(PatchCursor + Reloc.GuestRIPMove.Offset);
       dc64(NeutralGuestBase + Reloc.GuestRIPMove.GuestRIP);
       break;
     }
