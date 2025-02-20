@@ -973,7 +973,10 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
   auto& CompiledCode = CodeData;
 
   {
-    auto Output = fextl::fmt::format("Guest block {:#x} -> {}:\n", GuestRIP, fmt::ptr(CompiledCode.BlockBegin));
+    auto Region = CTX->SyscallHandler->LookupAOTIRCacheEntry(ThreadState, GuestRIP);
+    auto Output = fextl::fmt::format("Guest block +{:#x} in {} ({:#x} -> {}):\n", GuestRIP - Region.VAFileStart,
+                                     Region.Entry ? Region.Entry->Filename : "UNKNOWN", GuestRIP, fmt::ptr(CompiledCode.BlockBegin));
+
     write(CodeDumpFD, Output.data(), Output.size());
   }
 
