@@ -590,9 +590,14 @@ int main(int argc, char** argv, char** const envp) try {
 
   SyscallHandler->DeserializeSeccompFD(ParentThread, FEXSeccompFD);
 
+  const bool TemporaryGenerateAOT = false;
+  const bool TemporaryLoadAOT = !TemporaryGenerateAOT;
+
   // Load AOT cache for all objects loaded previously
   // NOTE: FetchAOTIRCacheEntry has a special case for addr == 0
-  CTX->FetchAOTIRCacheEntry(ParentThread->Thread, 0);
+  if (TemporaryLoadAOT) {
+    CTX->FetchAOTIRCacheEntry(ParentThread->Thread, 0);
+  }
   FEX_CONFIG_OPT(SMCChecks, SMCCHECKS);
   if (SMCChecks() != FEXCore::Config::CONFIG_SMC_NONE) {
     // After having preloading the disk cache, ld.so will probably trigger this when applying ELF relocations
@@ -639,10 +644,10 @@ int main(int argc, char** argv, char** const envp) try {
     });
   }
 
-  if (AOTIRGenerate() || false) {
+  if (AOTIRGenerate() || TemporaryGenerateAOT) {
     fmt::print(stderr, "Running AOT...\n");
     for (auto& Section : Loader.Sections) {
-      FEX::AOT::AOTGenSection(CTX.get(), Section);
+      FEX::AOT::AOTGenSection(*ParentThread->Thread, CTX.get(), Section);
     }
 
     FHU::Filesystem::CreateDirectories("/tmp/fexcache");
@@ -653,7 +658,7 @@ int main(int argc, char** argv, char** const envp) try {
     close(fd);
 
 
-    fmt::print(stderr, "... done running AOT. Waiting for CTRL+C\n");
+    fextl::fmt::print(stderr, "... done running AOT. Waiting for CTRL+C\n");
     while (true) {};
     // ERROR_AND_DIE_FMT("All good, terminating for debugging now");
   } else {

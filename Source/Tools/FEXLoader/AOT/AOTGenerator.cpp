@@ -16,7 +16,7 @@
 #include <thread>
 
 namespace FEX::AOT {
-void AOTGenSection(FEXCore::Context::Context* CTX, ELFCodeLoader::LoadedSection& Section) {
+void AOTGenSection(FEXCore::Core::InternalThreadState& ParentThread, FEXCore::Context::Context* CTX, ELFCodeLoader::LoadedSection& Section) {
   // TODO: Constrain to specific object more cleanly
   // TODO: Ensure cross-section jumps are always long!
 
@@ -118,7 +118,8 @@ void AOTGenSection(FEXCore::Context::Context* CTX, ELFCodeLoader::LoadedSection&
       setpriority(PRIO_PROCESS, FHU::Syscalls::gettid(), 19);
 
       // Setup thread - Each compilation thread uses its own backing FEX thread
-      auto Thread = CTX->CreateThread(0, 0);
+      // auto Thread = CTX->CreateThread(0, 0);
+      auto* Thread = &ParentThread;
       fextl::set<uint64_t> ExternalBranchesLocal;
       CTX->ConfigureAOTGen(Thread, &ExternalBranchesLocal, SectionMaxAddress);
 
@@ -150,14 +151,15 @@ void AOTGenSection(FEXCore::Context::Context* CTX, ELFCodeLoader::LoadedSection&
         ExternalBranchesLocal.clear();
       }
 
-      // Write cache to disk. Existing files are atomically replaced
-      int fd = ::open("/tmp/fexcache.new", O_WRONLY | O_TRUNC);
-      CTX->FinalizeAOTIRCache(*Thread, fd);
-      close(fd);
-      ::rename("/tmp/fexcache.new", "/tmp/fexcache");
+      // TODO: Only for FEXServer...
+      // // Write cache to disk. Existing files are atomically replaced
+      // int fd = ::open("/tmp/fexcache.new", O_WRONLY | O_TRUNC);
+      // CTX->FinalizeAOTIRCache(*Thread, fd);
+      // close(fd);
+      // ::rename("/tmp/fexcache.new", "/tmp/fexcache");
 
       // All entryproints processed, cleanup this thread
-      CTX->DestroyThread(Thread);
+      // CTX->DestroyThread(Thread);
       // This thread is now getting abandoned. Disable glibc allocator checking so glibc can safely cleanup its internal allocations.
       // FEXCore::Allocator::YesIKnowImNotSupposedToUseTheGlibcAllocator::HardDisable();
 

@@ -814,7 +814,24 @@ void ContextImpl::FinalizeAOTIRCache(FEXCore::Core::InternalThreadState& Thread,
   auto CodeBuffer = GetCurrentCodeBuffer();
   auto& LookupCache = *Thread.LookupCache->Shared;
 
-  const auto& Relocations = Thread.CPUBackend->GetRelocations();
+  /*const */ auto /*&*/ Relocations = Thread.CPUBackend->GetRelocations();
+  // TODO: Drop relocations that don't belong to this library
+
+  auto SourceBinary = SyscallHandler->LookupAOTIRCacheEntry(&Thread, LookupCache.BlockList.begin()->first);
+  if (!SourceBinary.Entry) {
+    fmt::print(stderr, "Skipping cache write-out since no backing binary was found\n");
+    return;
+  }
+
+  // Rebase relocations to library base address
+  // TODO: Do this in a dedicated "FinalizeRelocations" function
+  for (auto& Relocation : Relocations) {
+    switch (Relocation.Header.Type) {
+    case FEXCore::CPU::RelocationTypes::RELOC_GUEST_RIP_MOVE:
+    case FEXCore::CPU::RelocationTypes::RELOC_GUEST_RIP_LITERAL: Relocation.GuestRIPMove.GuestRIP -= SourceBinary.VAFileStart; break;
+    default:;
+    }
+  }
 
   // TODO: Verify source ELF is PIE, otherwise we'll need to factor in ELF relocations
 
@@ -840,9 +857,15 @@ void ContextImpl::FinalizeAOTIRCache(FEXCore::Core::InternalThreadState& Thread,
   // Dump guest<->host block mappings
   // TODO: Strip ASLR-dependence by relocating to base ELF offset
   // TODO: Verify this all relates to the dumped ELF (and not any of its dependencies)
+  // TODO: Drop blocks that don't belong to this library
   {
     fextl::vector<decltype(LookupCache.BlockList)::value_type> BlockList {LookupCache.BlockList.begin(), LookupCache.BlockList.end()};
-    ::write(fd, BlockList.data(), sizeof(BlockList[0]) * BlockList.size());
+    for (auto [Guest, Host] : LookupCache.BlockList) {
+      Guest -= SourceBinary.VAFileStart;
+      ::write(fd, &Guest, sizeof(Guest));
+      Host -= reinterpret_cast<uintptr_t>(CodeBuffer->Ptr);
+      ::write(fd, &Host, sizeof(Host));
+    }
   }
   for (auto& [Record, _] : *LookupCache.BlockLinks) {
     // TODO: Consider if we need to serialize this data
@@ -853,6 +876,10 @@ void ContextImpl::FinalizeAOTIRCache(FEXCore::Core::InternalThreadState& Thread,
     // auto Data = std::pair {Guest, Host};
     // ::write(fd, &Data, sizeof(Data));
   }
+
+  std::vector<std::byte> CodeBufferData(CodeBuffer->UsedSize);
+  memcpy(CodeBufferData.data(), CodeBuffer->Ptr, CodeBufferData.size());
+  (void)Thread.CPUBackend->RelocateJITObjectCode(SourceBinary.VAFileStart, CodeBufferData, Relocations, true);
 
   // Dump relocations
   ::write(fd, Relocations.data(), Relocations.size() * sizeof(Relocations[0]));
@@ -868,7 +895,7 @@ void ContextImpl::FinalizeAOTIRCache(FEXCore::Core::InternalThreadState& Thread,
 
   // Dump CodeBuffer to file
   // TODO: Instead of dumping UsedSize, only dump the data belonging to the library!
-  ::write(fd, CodeBuffer->Ptr, CodeBuffer->UsedSize);
+  ::write(fd, CodeBufferData.data(), CodeBufferData.size());
 
 
   // TODO:
@@ -1123,8 +1150,14 @@ void ContextImpl::FetchAOTIRCacheEntry(FEXCore::Core::InternalThreadState* Threa
     // Thread->CPUBackend->AllocateAndSetCodeBufferForRegion(reinterpret_cast<uintptr_t>(GuestRIPLookup.Entry));
     fextl::fmt::print(stderr, "LoadAll to {:#x} now {}\n", GuestRIP, GuestRIPLookup.Entry->FileId);
 
+    if (!GuestRIPLookup.Entry->FileId.starts_with("ls-")) {
+      return;
+    }
 
     int fd = open(fextl::fmt::format("/tmp/fexcache/{}", "ls" /* TODO */).c_str(), O_RDONLY);
+    if (fd == -1) {
+      ERROR_AND_DIE_FMT("TODO: Failed loading cache");
+    }
 
     {
       // TODO: Acquire write mutex?
@@ -1155,13 +1188,18 @@ void ContextImpl::FetchAOTIRCacheEntry(FEXCore::Core::InternalThreadState* Threa
         ERROR_AND_DIE_FMT("Version mismatch");
       }
 
+      std::span<std::byte> CodeBufferRange =
+        std::as_writable_bytes(std::span {CodeBuffer->Ptr, CodeBuffer->Ptr + CodeBuffer->Size}).subspan(CodeBuffer->UsedSize, header.CodeBufferSize);
+
       // Read guest<->host block mappings
       // TODO: Strip ASLR-dependence by relocating to base ELF offset
       // TODO: Verify this all relates to the dumped ELF (and not any of its dependencies)
       {
         fextl::vector<decltype(LookupCache.BlockList)::value_type> BlockList(header.NumBlocks);
         ::read(fd, BlockList.data(), sizeof(BlockList[0]) * BlockList.size());
-        LookupCache.BlockList.insert(BlockList.begin(), BlockList.end());
+        for (auto& [Guest, Host] : BlockList) {
+          LookupCache.BlockList[Guest + GuestRIP] = Host + reinterpret_cast<uintptr_t>(CodeBufferRange.data());
+        }
       }
 
       // TODO: De-serialize BlockLinks (if needed)
@@ -1178,28 +1216,28 @@ void ContextImpl::FetchAOTIRCacheEntry(FEXCore::Core::InternalThreadState* Threa
       auto Off = lseek(fd, 0, SEEK_CUR);
       while (Off != AlignUp(Off, Utils::FEX_PAGE_SIZE)) {
         auto BytesToWrite = std::min(AlignUp(Off, Utils::FEX_PAGE_SIZE) - Off, sizeof(Zero));
-        ::write(fd, Zero, BytesToWrite);
+        ::lseek(fd, BytesToWrite, SEEK_CUR);
         Off += BytesToWrite;
       }
 
       // Read CodeBuffer from file
       // TODO: mmap this into memory instead
-      if (header.CodeBufferSize > CodeBuffer->Size) {
+      if (header.CodeBufferSize > CodeBufferRange.size_bytes()) {
         ERROR_AND_DIE_FMT("TODO: CodeBuffer too small to load initial cache");
       }
-      ::read(fd, CodeBuffer->Ptr, header.CodeBufferSize);
+      ::read(fd, CodeBufferRange.data(), header.CodeBufferSize);
       CodeBuffer->UsedSize += header.CodeBufferSize;
       // TODO: Move JIT write cursor
+      Thread->CPUBackend->ImportCode(header.CodeBufferSize);
 
       // Apply FEX relocations
       // TODO: Change parameter to span<byte>
-      auto CompiledCode = Thread->CPUBackend->RelocateJITObjectCode(
-        GuestRIP, std::span {reinterpret_cast<const char*>(CodeBuffer->Ptr), CodeBuffer->UsedSize}, Relocations);
+      auto CompiledCode = Thread->CPUBackend->RelocateJITObjectCode(GuestRIP, CodeBufferRange, Relocations, false);
 
       // TODO: Invalidate any pages that are affected by ELF relocations (and eventually add support for converting those relocations to FEX relocations)
 
-      fextl::fmt::print(stderr, "Loaded cache: {}-{} ({} relocs)\n", fmt::ptr(CodeBuffer->Ptr),
-                        fmt::ptr(CodeBuffer->Ptr + CodeBuffer->UsedSize), Relocations.size());
+      fextl::fmt::print(stderr, "Loaded cache: {}-{} ({} relocs)\n", fmt::ptr(CodeBufferRange.data()),
+                        fmt::ptr(CodeBufferRange.data() + header.CodeBufferSize), Relocations.size());
     }
     close(fd);
 

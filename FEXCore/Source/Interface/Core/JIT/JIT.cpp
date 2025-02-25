@@ -762,7 +762,7 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
                                                    bool CheckTF) {
   FEXCORE_PROFILE_SCOPED("Arm64::CompileCode");
 
-  ERROR_AND_DIE_FMT("TODO: Compiling new code will overwrite CodeBuffer. Make sure to adjust the write cursor!");
+  // ERROR_AND_DIE_FMT("TODO: Compiling new code will overwrite CodeBuffer. Make sure to adjust the write cursor!");
 
   JumpTargets.clear();
   uint32_t SSACount = IR->GetSSACount();
@@ -1008,20 +1008,22 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
   return CodeData;
 }
 
-void* Arm64JITCore::RelocateJITObjectCode(uint64_t Entry, std::span<const char> HostCode, std::span<const Relocation> Relocations) {
+void* Arm64JITCore::RelocateJITObjectCode(uint64_t Entry, std::span<std::byte> HostCode, std::span<const Relocation> Relocations, bool ForStorage) {
   if (GetCursorOffset() + HostCode.size_bytes() + sizeof(JITCodeHeader) + sizeof(JITCodeTail) > CurrentCodeBuffer->Size) {
-    CTX->ClearCodeCache(ThreadState);
+    ERROR_AND_DIE_FMT("Out of CodeBuffer space");
+    // CTX->ClearCodeCache(ThreadState);
   }
 
-  dc32(sizeof(JITCodeHeader) + HostCode.size_bytes()); // JITCodeHeader
-  auto RelocatedCode = GetCursorAddress<uint8_t*>();
-  auto RelocatedCodeBeginOffset = GetCursorOffset();
-  auto RelocatedCodeEndOffset = GetCursorOffset() + HostCode.size_bytes();
+  const auto RelocatedCode = GetCursorAddress<uint8_t*>();
+  const auto RelocatedCodeBeginOffset = GetCursorOffset();
+  const auto RelocatedCodeEndOffset = GetCursorOffset() + HostCode.size_bytes();
+
 
   memcpy(RelocatedCode, HostCode.data(), HostCode.size_bytes());
 
-  auto success = ApplyRelocations(Entry, reinterpret_cast<uintptr_t>(RelocatedCode), GetCursorOffset(), Relocations);
+  auto success = ApplyRelocations(ForStorage ? 0 : Entry, RelocatedCodeBeginOffset, Relocations, ForStorage);
   if (!success) {
+    ERROR_AND_DIE_FMT("RELOCATION FAILED");
     SetCursorOffset(RelocatedCodeBeginOffset);
     return nullptr;
   }
@@ -1029,8 +1031,8 @@ void* Arm64JITCore::RelocateJITObjectCode(uint64_t Entry, std::span<const char> 
   // Restore cursor position
   SetCursorOffset(RelocatedCodeEndOffset);
 
-
-  {
+  // NOTE: Actually this should be preserved now, so we don't run it anymore
+  if (false) {
     auto JITBlockTail = GetCursorAddress<JITCodeTail*>();
 
     JITBlockTail->RIP = Entry;
@@ -1057,10 +1059,16 @@ void* Arm64JITCore::RelocateJITObjectCode(uint64_t Entry, std::span<const char> 
     CursorIncrement(sizeof(JITCodeTail));
   }
 
+  // Copy relocated code back to original location
+  // TODO: Perform in-place relocation properly
+  memcpy(HostCode.data(), RelocatedCode, HostCode.size_bytes());
+
+  // Restore cursor position
+  SetCursorOffset(RelocatedCodeBeginOffset);
+
   // TODO: Drop use of vixl
   // vixl::aarch64::CPU::EnsureIAndDCacheCoherency(reinterpret_cast<void*>(RelocatedCode), HostCode.size_bytes());
-  ClearICache(reinterpret_cast<void*>(RelocatedCode), HostCode.size_bytes());
-
+  ClearICache(reinterpret_cast<void*>(HostCode.data()), HostCode.size_bytes());
 
   return RelocatedCode;
 }
@@ -1079,6 +1087,11 @@ void Arm64JITCore::ResetStack() {
     LoadConstant(ARMEmitter::Size::i64Bit, TMP1, TotalSpillSlotsSize);
     add(ARMEmitter::Size::i64Bit, ARMEmitter::XReg::rsp, ARMEmitter::XReg::rsp, TMP1, ARMEmitter::ExtendedType::LSL_64, 0);
   }
+}
+
+void Arm64JITCore::ImportCode(uint64_t NumBytes) {
+  CursorIncrement(NumBytes);
+  manager.LatestOffset = GetCursorOffset();
 }
 
 fextl::unique_ptr<CPUBackend> CreateArm64JITCore(FEXCore::Context::ContextImpl* ctx, FEXCore::Core::InternalThreadState* Thread) {
