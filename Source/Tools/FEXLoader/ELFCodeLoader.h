@@ -41,9 +41,11 @@ class ELFCodeLoader final : public FEX::CodeLoader {
 
   bool ElfValid {false};
   bool ExecutableStack {false};
+public:
   uintptr_t MainElfBase {};
   uintptr_t InterpeterElfBase {};
   uintptr_t MainElfEntrypoint {};
+private:
   uintptr_t Entrypoint {};
   uintptr_t BrkStart {};
   uintptr_t StackPointer {};

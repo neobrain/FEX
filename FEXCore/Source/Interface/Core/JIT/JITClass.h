@@ -325,7 +325,7 @@ private:
   const fextl::vector<FEXCore::CPU::Relocation>& GetRelocations() const override;
 
   // TODO: Revisit this interface. For now, it just moves the cursor by the given number of bytes
-  void ImportCode(uint64_t NumBytes);
+  void ImportCode(uint64_t NumBytes) override;
 
   /**  @} */
 

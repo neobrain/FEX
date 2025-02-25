@@ -80,6 +80,10 @@ namespace FEXCore::CPU {
 extern mymutex codebuffermutex;
 }
 
+fextl::string FEXCore::HLE::AOTIRCacheEntryLookupResult::GetCacheEntryId() const {
+  return Entry->FileId;
+}
+
 namespace FEXCore::Context {
 ContextImpl::ContextImpl(const FEXCore::HostFeatures& Features)
   : HostFeatures {Features}
@@ -1154,7 +1158,7 @@ void ContextImpl::FetchAOTIRCacheEntry(FEXCore::Core::InternalThreadState* Threa
       return;
     }
 
-    int fd = open(fextl::fmt::format("/tmp/fexcache/{}", "ls" /* TODO */).c_str(), O_RDONLY);
+    int fd = open(fextl::fmt::format("/tmp/fexcache/{}", GuestRIPLookup.Entry->FileId).c_str(), O_RDONLY);
     if (fd == -1) {
       ERROR_AND_DIE_FMT("TODO: Failed loading cache");
     }
