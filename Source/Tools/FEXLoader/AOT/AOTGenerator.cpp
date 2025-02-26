@@ -40,56 +40,63 @@ void AOTGenSection(FEXCore::Core::InternalThreadState& ParentThread, FEXCore::Co
   ELFLoader::ELFContainer container {Section.Filename, "", true};
 
   // Add symbols to the branch targets list
-  container.AddSymbols([&](ELFLoader::ELFSymbol* sym) {
-    auto Destination = sym->Address + Section.ElfBase;
+  if (true) {
+    container.AddSymbols([&](ELFLoader::ELFSymbol* sym) {
+      auto Destination = sym->Address + Section.ElfBase;
 
-    if (!(Destination >= Section.Base && Destination <= (Section.Base + Section.Size))) {
-      return; // outside of current section, unlikely to be real code
-    }
+      if (!(Destination >= Section.Base && Destination <= (Section.Base + Section.Size))) {
+        return; // outside of current section, unlikely to be real code
+      }
 
-    InitialBranchTargets.insert(Destination);
-  });
+      InitialBranchTargets.insert(Destination);
+    });
+  }
 
   LogMan::Msg::IFmt("Symbol seed: {}", InitialBranchTargets.size());
 
   // Add unwind entries to the branch target list
-  container.AddUnwindEntries([&](uintptr_t Entry) {
-    auto Destination = Entry + Section.ElfBase;
+  // TODO: This breaks Ender Lilies
+  if (false) {
+    container.AddUnwindEntries([&](uintptr_t Entry) {
+      auto Destination = Entry + Section.ElfBase;
 
-    if (!(Destination >= Section.Base && Destination <= (Section.Base + Section.Size))) {
-      return; // outside of current section, unlikely to be real code
-    }
+      if (!(Destination >= Section.Base && Destination <= (Section.Base + Section.Size))) {
+        return; // outside of current section, unlikely to be real code
+      }
 
-    InitialBranchTargets.insert(Destination);
-  });
+      InitialBranchTargets.insert(Destination);
+    });
+  }
 
   LogMan::Msg::IFmt("Symbol + Unwind seed: {}", InitialBranchTargets.size());
 
   // Scan the executable section and try to find function entries
-  for (size_t Offset = 0; Offset < (Section.Size - 16); Offset++) {
-    uint8_t* pCode = (uint8_t*)(Section.Base + Offset);
+  if (false) {
+    for (size_t Offset = 0; Offset < (Section.Size - 16); Offset++) {
+      uint8_t* pCode = (uint8_t*)(Section.Base + Offset);
 
-    // Possible CALL <disp32>
-    if (*pCode == 0xE8) {
-      uintptr_t Destination = (int)(pCode[1] | (pCode[2] << 8) | (pCode[3] << 16) | (pCode[4] << 24));
-      Destination += (uintptr_t)pCode + 5;
+      // Possible CALL <disp32>
+      if (*pCode == 0xE8) {
+        uintptr_t Destination = (int)(pCode[1] | (pCode[2] << 8) | (pCode[3] << 16) | (pCode[4] << 24));
+        Destination += (uintptr_t)pCode + 5;
 
-      auto DestinationPtr = (uint8_t*)Destination;
+        auto DestinationPtr = (uint8_t*)Destination;
 
-      if (!(Destination >= Section.Base && Destination <= (Section.Base + Section.Size))) {
-        continue; // outside of current section, unlikely to be real code
+        if (!(Destination >= Section.Base && Destination <= (Section.Base + Section.Size))) {
+          continue; // outside of current section, unlikely to be real code
+        }
+
+        if (DestinationPtr[0] == 0 && DestinationPtr[1] == 0) {
+          continue; // add al, [rax], unlikely to be real code
+        }
+
+        InitialBranchTargets.insert(Destination);
       }
 
-      if (DestinationPtr[0] == 0 && DestinationPtr[1] == 0) {
-        continue; // add al, [rax], unlikely to be real code
+      // endbr64 marker marks an indirect branch destination
+      if (pCode[0] == 0xf3 && pCode[1] == 0x0f && pCode[2] == 0x1e && pCode[3] == 0xfa) {
+        InitialBranchTargets.insert((uintptr_t)pCode);
       }
-
-      InitialBranchTargets.insert(Destination);
-    }
-
-    // endbr64 marker marks an indirect branch destination
-    if (pCode[0] == 0xf3 && pCode[1] == 0x0f && pCode[2] == 0x1e && pCode[3] == 0xfa) {
-      InitialBranchTargets.insert((uintptr_t)pCode);
     }
   }
 

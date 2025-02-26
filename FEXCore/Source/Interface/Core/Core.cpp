@@ -814,14 +814,14 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
   };
 }
 
-void ContextImpl::FinalizeAOTIRCache(FEXCore::Core::InternalThreadState& Thread, int fd) {
+void ContextImpl::FinalizeAOTIRCache(FEXCore::Core::InternalThreadState& Thread, int fd, uint64_t BaseGuestEntry) {
   auto CodeBuffer = GetCurrentCodeBuffer();
   auto& LookupCache = *Thread.LookupCache->Shared;
 
   /*const */ auto /*&*/ Relocations = Thread.CPUBackend->GetRelocations();
   // TODO: Drop relocations that don't belong to this library
 
-  auto SourceBinary = SyscallHandler->LookupAOTIRCacheEntry(&Thread, LookupCache.BlockList.begin()->first);
+  auto SourceBinary = SyscallHandler->LookupAOTIRCacheEntry(&Thread, BaseGuestEntry);
   if (!SourceBinary.Entry) {
     fmt::print(stderr, "Skipping cache write-out since no backing binary was found\n");
     return;

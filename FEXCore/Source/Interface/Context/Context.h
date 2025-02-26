@@ -161,7 +161,7 @@ public:
     IRCaptureCache.SetAOTIRRenamer(std::move(CacheRenamer));
   }
 
-  void FinalizeAOTIRCache(FEXCore::Core::InternalThreadState&, int fd) override; /* {
+  void FinalizeAOTIRCache(FEXCore::Core::InternalThreadState&, int fd, uint64_t BaseGuestEntry) override; /* {
      IRCaptureCache.FinalizeAOTIRCache();
    }*/
   void WriteFilesWithCode(AOTIRCodeFileWriterFn Writer) override {

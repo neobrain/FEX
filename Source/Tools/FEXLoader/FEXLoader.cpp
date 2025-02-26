@@ -607,7 +607,7 @@ int main(int argc, char** argv, char** const envp) try {
       } else {
         while (!FHU::Filesystem::Exists(fextl::fmt::format("/tmp/fexcache/{}", Entry.GetCacheEntryId()))) {
           fextl::fmt::print(stderr, "Process {} waiting for AOT cache {} to be populated\n", ::getpid(), Entry.GetCacheEntryId());
-          std::this_thread::sleep_for(std::chrono::seconds {1});
+          std::this_thread::sleep_for(std::chrono::milliseconds {16});
         }
         CTX->FetchAOTIRCacheEntry(ParentThread->Thread, 0);
       }
@@ -669,7 +669,7 @@ int main(int argc, char** argv, char** const envp) try {
     // TODO: Consider O_EXCL so that this fails to overwrite existing files?
     auto Entry = SyscallHandler->LookupAOTIRCacheEntry(ParentThread->Thread, Loader.MainElfBase);
     int fd = open(fextl::fmt::format("/tmp/fexcache/{}", Entry.GetCacheEntryId()).c_str(), O_CREAT | O_WRONLY, 0644);
-    CTX->FinalizeAOTIRCache(*ParentThread->Thread, fd);
+    CTX->FinalizeAOTIRCache(*ParentThread->Thread, fd, Loader.MainElfBase);
     LogMan::Msg::IFmt("AOTIR Cache Stored");
     close(fd);
 
