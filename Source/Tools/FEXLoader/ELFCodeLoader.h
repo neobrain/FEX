@@ -61,7 +61,7 @@ private:
     return PAGE_ALIGN(last->p_vaddr + last->p_memsz);
   }
 
-  bool MapFile(const ELFParser& file, uintptr_t Base, const Elf64_Phdr& Header, int prot, int flags, FEX::HLE::SyscallHandler* const Handler) {
+  bool MapFile(const ELFParser& file, uintptr_t Base, const Elf64_Phdr& Header, int prot, int flags, FEX::HLE::SyscallMmapInterface* const Handler) {
 
     auto addr = Base + PAGE_START(Header.p_vaddr);
     auto size = Header.p_filesz + PAGE_OFFSET(Header.p_vaddr);
@@ -109,7 +109,7 @@ private:
     return rv;
   }
 
-  std::optional<uintptr_t> LoadElfFile(ELFParser& Elf, uintptr_t* BrkBase, FEX::HLE::SyscallHandler* const Handler, uint64_t LoadHint = 0) {
+  std::optional<uintptr_t> LoadElfFile(ELFParser& Elf, uintptr_t* BrkBase, FEX::HLE::SyscallMmapInterface* const Handler, uint64_t LoadHint = 0) {
 
     uintptr_t LoadBase = 0;
 
@@ -357,7 +357,7 @@ public:
     return MainElf.fd;
   }
 
-  bool MapMemory(FEX::HLE::SyscallHandler* const Handler) {
+  bool MapMemory(FEX::HLE::SyscallMmapInterface* const Handler) {
     for (const auto& Header : MainElf.phdrs) {
       if (Header.p_type == PT_GNU_STACK) {
         if (Header.p_flags & PF_X) {
