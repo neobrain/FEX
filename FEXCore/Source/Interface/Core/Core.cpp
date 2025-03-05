@@ -882,7 +882,9 @@ void ContextImpl::FinalizeAOTIRCache(FEXCore::Core::InternalThreadState& Thread,
   }
 
   std::vector<std::byte> CodeBufferData(CodeBuffer->UsedSize);
-  memcpy(CodeBufferData.data(), CodeBuffer->Ptr, CodeBufferData.size());
+  if (!CodeBufferData.empty()) {
+    memcpy(CodeBufferData.data(), CodeBuffer->Ptr, CodeBufferData.size());
+  }
   (void)Thread.CPUBackend->RelocateJITObjectCode(SourceBinary.VAFileStart, CodeBufferData, Relocations, true);
 
   // Dump relocations

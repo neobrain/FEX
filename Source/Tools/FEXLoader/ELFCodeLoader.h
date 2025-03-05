@@ -36,6 +36,7 @@
 #define PAGE_ALIGN(x) (((x) + 4095) & ~(uintptr_t)(4095))
 
 class ELFCodeLoader final : public FEX::CodeLoader {
+public:
   ELFParser MainElf {};
   ELFParser InterpElf {};
 
@@ -109,6 +110,7 @@ private:
     return rv;
   }
 
+public:
   std::optional<uintptr_t> LoadElfFile(ELFParser& Elf, uintptr_t* BrkBase, FEX::HLE::SyscallMmapInterface* const Handler, uint64_t LoadHint = 0) {
 
     uintptr_t LoadBase = 0;
