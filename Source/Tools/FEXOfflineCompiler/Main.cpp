@@ -20,6 +20,8 @@
 
 #include <fmt/printf.h>
 
+#include <fstream>
+
 // TODO: Change FinalizeAOTIRCache to take VAFileStart as a parameter instead...
 static uintptr_t VAFileStart = 0;
 
@@ -65,13 +67,26 @@ public:
 
 class DummySignalDelegator final : public FEXCore::SignalDelegator {};
 
-int main(int argc, char** argv, char** const envp /* TODO: Drop */) {
+static void MsgHandler(LogMan::DebugLevels Level, const char* Message) {
+  fmt::print("[{}] {}\n", LogMan::DebugLevelStr(Level), Message);
+}
+
+static void AssertHandler(const char* Message) {
+  fmt::print("[ASSERT] {}\n", Message);
+}
+
+int main(int argc, char** argv) {
+  LogMan::Throw::InstallHandler(AssertHandler);
+  LogMan::Msg::InstallHandler(MsgHandler);
+
   optparse::OptionParser Parser {};
   Parser.add_option("--host-dcache-line-size").type("long").help("Target DCache line size to use when compiling code (default: detect from host)");
   Parser.add_option("--host-icache-line-size").type("long").help("Target DCache line size to use when compiling code (default: detect from host)");
   Parser.add_option("--host-features").type("long").help("Target HostFeatures to use when compiling code (default: detect from host)");
 
   Parser.add_option("--smc").type("long").help("Strategy for self-modifying-code (default: none)");
+
+  Parser.add_option("--codemap").help("Path to code map");
 
   optparse::Values Options = Parser.parse_args(argc, argv);
   if (Parser.args().size() != 1) {
@@ -80,6 +95,37 @@ int main(int argc, char** argv, char** const envp /* TODO: Drop */) {
   }
 
   const auto ProgramName = Parser.args()[0];
+
+  fextl::set<uintptr_t> InitialBranchTargets;
+
+  if (Options.is_set("codemap")) {
+    std::ifstream Codemap(((std::string)Options.get("codemap")).c_str(), std::ios_base::binary);
+    if (!Codemap) {
+      fmt::print("Could not open {}\n", (std::string)Options.get("codemap"));
+      return 1;
+    }
+
+    fextl::set<std::string> Files;
+
+    while (true) {
+      std::string Filename;
+      std::getline(Codemap, Filename, '\0');
+      uint64_t Start, Size;
+      Codemap.read(reinterpret_cast<char*>(&Start), sizeof(Start));
+      Codemap.read(reinterpret_cast<char*>(&Size), sizeof(Size));
+      if (!Codemap) {
+        break;
+      }
+      Files.insert(Filename);
+      if (Filename == ProgramName.c_str()) {
+        fmt::print("Block: {}+{:#x}-{:#x}\n", Filename, Start, Start + Size);
+        InitialBranchTargets.insert(Start);
+      }
+    }
+    for (auto& File : Files) {
+      fmt::print("Parsed codemap entries for {}\n", File);
+    }
+  }
 
   // TODO: Support compiling from an FD
 
@@ -90,7 +136,11 @@ int main(int argc, char** argv, char** const envp /* TODO: Drop */) {
   // TODO: From command line
   FEXCore::Config::Set(FEXCore::Config::CONFIG_MULTIBLOCK, "0");
 
+  ELFCodeLoader Loader {ProgramName, -1, "", {ProgramName}, {}, {}, nullptr};
+  FEXCore::Config::Set(FEXCore::Config::CONFIG_IS64BIT_MODE, Loader.Is64BitMode() ? "1" : "0");
+
   // Load HostFeatures
+  // NOTE: Config must be fully initialized for detection to work
   FEXCore::HostFeatures HostFeatures {};
   const auto DetectedFeatures = FEX::FetchHostFeatures();
   if (Options.is_set("host-features")) {
@@ -125,13 +175,10 @@ int main(int argc, char** argv, char** const envp /* TODO: Drop */) {
     return EXIT_FAILURE;
   }
 
-  ELFCodeLoader Loader {ProgramName, -1, "", {ProgramName}, {}, {}, nullptr};
   if (!Loader.ELFWasLoaded()) {
     fmt::print("Invalid or Unsupported elf file.\n");
     return EXIT_FAILURE;
   }
-
-  FEXCore::Config::Set(FEXCore::Config::CONFIG_IS64BIT_MODE, Loader.Is64BitMode() ? "1" : "0");
 
   FEXCore::Context::InitializeStaticTables(Loader.Is64BitMode() ? FEXCore::Context::MODE_64BIT : FEXCore::Context::MODE_32BIT);
 
@@ -176,6 +223,14 @@ int main(int argc, char** argv, char** const envp /* TODO: Drop */) {
     ERROR_AND_DIE_FMT("Failed to load ELF file {}", ProgramName);
   }
 
+  {
+    decltype(InitialBranchTargets) InitialBranchTargets2;
+    for (auto Offset : InitialBranchTargets) {
+      InitialBranchTargets2.insert(Offset + VAFileStart);
+    }
+    InitialBranchTargets = std::move(InitialBranchTargets2);
+  }
+
   const auto SMCChecks = Options.is_set("smc") ? static_cast<FEXCore::Config::ConfigSMCChecks>(static_cast<long>(Options.get("smc"))) :
                                                  FEXCore::Config::CONFIG_SMC_NONE;
 
@@ -192,7 +247,7 @@ int main(int argc, char** argv, char** const envp /* TODO: Drop */) {
 
     fmt::print(stderr, "Running code discovery...\n");
     for (auto& Section : Loader.Sections) {
-      FEX::AOT::AOTGenSection(*ParentThread->Thread, CTX.get(), Section);
+      FEX::AOT::AOTGenSection(*ParentThread->Thread, CTX.get(), Section, InitialBranchTargets /* TODO: Avoid copying... */);
     }
 
     fmt::print(stderr, "Compiling code...\n");

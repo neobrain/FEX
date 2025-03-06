@@ -16,7 +16,8 @@
 #include <thread>
 
 namespace FEX::AOT {
-void AOTGenSection(FEXCore::Core::InternalThreadState& ParentThread, FEXCore::Context::Context* CTX, ELFCodeLoader::LoadedSection& Section) {
+void AOTGenSection(FEXCore::Core::InternalThreadState& ParentThread, FEXCore::Context::Context* CTX, ELFCodeLoader::LoadedSection& Section,
+                   fextl::set<uintptr_t> InitialBranchTargets) {
   // TODO: Constrain to specific object more cleanly
   // TODO: Ensure cross-section jumps are always long!
 
@@ -33,8 +34,6 @@ void AOTGenSection(FEXCore::Core::InternalThreadState& ParentThread, FEXCore::Co
   if (!Section.Executable || Section.Size < 16) {
     return;
   }
-
-  fextl::set<uintptr_t> InitialBranchTargets;
 
   // Load the ELF again with symbol parsing this time
   ELFLoader::ELFContainer container {Section.Filename, "", true};
