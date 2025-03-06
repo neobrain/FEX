@@ -44,8 +44,8 @@ extern std::atomic<uint64_t> TotalCodeBufferSize;
 extern std::atomic<uint64_t> TotalCodeBufferSizeUsed;
 } // namespace FEXCore::CPU
 
-namespace FEXCore::CPU {
-extern mymutex codebuffermutex;
+extern "C" {
+int CodeDumpFD = -1;
 }
 
 static constexpr size_t INITIAL_CODE_SIZE = 1024 * 1024 * 16;
@@ -1004,6 +1004,16 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
   }
 
   this->IR = nullptr;
+
+  if (CodeDumpFD != -1) {
+    auto Region = CTX->SyscallHandler->LookupAOTIRCacheEntry(ThreadState, Entry);
+    if (Region.Entry) {
+      write(CodeDumpFD, Region.Entry->Filename.c_str(), Region.Entry->Filename.size() + 1);
+      auto Offset = Entry - Region.VAFileStart;
+      write(CodeDumpFD, &Offset, sizeof(Offset));
+      write(CodeDumpFD, &Size, sizeof(Size));
+    }
+  }
 
   return CodeData;
 }
