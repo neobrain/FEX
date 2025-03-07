@@ -992,7 +992,9 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
 
   TotalCodeBufferSizeUsed += GetCursorOffset() - CurrentCodeBuffer->UsedSize;
   CurrentCodeBuffer->UsedSize = GetCursorOffset();
+#ifdef ENABLE_FEXCORE_PROFILER
   FEXTracyPlot("CodeBufferSizeUsed", static_cast<int64_t>(TotalCodeBufferSizeUsed) /** 100.f / TotalCodeBufferSize*/);
+#endif
 
   if (DebugData) {
     DebugData->HostCodeSize = CodeData.Size;
