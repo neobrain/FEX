@@ -43,7 +43,7 @@ public:
               const FEXCore::IR::RegisterAllocationData* RAData, bool CheckTF) override;
 
   [[nodiscard]]
-  void* RelocateJITObjectCode(uint64_t Entry, std::span<std::byte> HostCode, std::span<const Relocation> Relocations, bool ForStorage) override;
+  void* RelocateJITObjectCode(uint64_t Entry, std::span<const char> HostCode, std::span<const Relocation> Relocations) override;
 
   void ClearCache() override;
 
@@ -320,12 +320,9 @@ private:
   fextl::vector<FEXCore::CPU::Relocation> Relocations;
 
   ///< Relocation code loading
-  bool ApplyRelocations(uint64_t GuestEntry, uint64_t CursorEntry, std::span<const Relocation> EntryRelocations, bool ForStorage);
+  bool ApplyRelocations(uint64_t GuestEntry, uint64_t CodeEntry, uint64_t CursorEntry, std::span<const Relocation> EntryRelocations);
 
   const fextl::vector<FEXCore::CPU::Relocation>& GetRelocations() const override;
-
-  // TODO: Revisit this interface. For now, it just moves the cursor by the given number of bytes
-  void ImportCode(uint64_t NumBytes) override;
 
   /**  @} */
 

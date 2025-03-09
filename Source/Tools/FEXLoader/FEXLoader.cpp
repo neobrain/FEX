@@ -64,10 +64,6 @@ $end_info$
 #include <sys/sysinfo.h>
 #include <sys/signal.h>
 
-extern "C" {
-extern int CodeDumpFD;
-}
-
 namespace {
 static bool SilentLog {};
 static int OutputFD {STDERR_FILENO};
@@ -546,6 +542,12 @@ int main(int argc, char** argv, char** const envp) try {
     SyscallHandler->FM.TrackFEXFD(FEXServerLogging::FEXServerFD);
   }
 
+  // {
+  //   int ProgramFD = Loader.GetMainElfFD();
+  //   auto CacheFD = FEXServerClient::RequestCodeCache(FEXServerClient::GetServerFD(), ProgramFD);
+  //   ERROR_AND_DIE_FMT("TODO: Implement cache loading logic");
+  // }
+
   {
     Loader.SetVDSOBase(VDSOMapping.VDSOBase);
     Loader.CalculateHWCaps(CTX.get());
@@ -577,9 +579,6 @@ int main(int argc, char** argv, char** const envp) try {
     return 1;
   }
 
-  FHU::Filesystem::CreateDirectories("/tmp/fexcode");
-  CodeDumpFD = open(fextl::fmt::format("/tmp/fexcode/{}.{}.bin", Program.ProgramName, ::getpid()).c_str(), O_CREAT | O_WRONLY, 0644);
-
   auto ParentThread = SyscallHandler->TM.CreateThread(Loader.DefaultRIP(), Loader.GetStackPointer());
   SyscallHandler->TM.TrackThread(ParentThread);
   SignalDelegation->RegisterTLSState(ParentThread);
@@ -591,35 +590,9 @@ int main(int argc, char** argv, char** const envp) try {
 
   SyscallHandler->DeserializeSeccompFD(ParentThread, FEXSeccompFD);
 
-  bool TemporaryGenerateAOT = false;
-  const bool TemporaryLoadAOT = !TemporaryGenerateAOT;
-
   // Load AOT cache for all objects loaded previously
   // NOTE: FetchAOTIRCacheEntry has a special case for addr == 0
-  if (TemporaryLoadAOT) {
-    auto Entry = SyscallHandler->LookupAOTIRCacheEntry(ParentThread->Thread, Loader.MainElfBase);
-    if (FHU::Filesystem::Exists(fextl::fmt::format("/tmp/fexcache/{}", Entry.GetCacheEntryId()))) {
-      CTX->FetchAOTIRCacheEntry(ParentThread->Thread, 0);
-    } else {
-      // TODO: Query from FEXServer whether to generate a cache or not!
-      if (false) {
-        int ProgramFD = Loader.GetMainElfFD();
-        auto CacheFD = FEXServerClient::RequestCodeCache(FEXServerClient::GetServerFD(), ProgramFD);
-        ERROR_AND_DIE_FMT("TODO: Implement cache loading logic");
-      }
-
-      if (!fork()) { // TODO: This must probably happen earlier...
-        // Generate on the fly
-        TemporaryGenerateAOT = true;
-      } else {
-        while (!FHU::Filesystem::Exists(fextl::fmt::format("/tmp/fexcache/{}", Entry.GetCacheEntryId()))) {
-          fextl::fmt::print(stderr, "Process {} waiting for AOT cache {} to be populated\n", ::getpid(), Entry.GetCacheEntryId());
-          std::this_thread::sleep_for(std::chrono::milliseconds {16});
-        }
-        CTX->FetchAOTIRCacheEntry(ParentThread->Thread, 0);
-      }
-    }
-  }
+  CTX->FetchAOTIRCacheEntry(ParentThread->Thread, 0);
   FEX_CONFIG_OPT(SMCChecks, SMCCHECKS);
   if (SMCChecks() != FEXCore::Config::CONFIG_SMC_NONE) {
     // After having preloading the disk cache, ld.so will probably trigger this when applying ELF relocations
@@ -666,7 +639,7 @@ int main(int argc, char** argv, char** const envp) try {
     });
   }
 
-  if (AOTIRGenerate() || TemporaryGenerateAOT) {
+  if (AOTIRGenerate() || false) {
     fmt::print(stderr, "Running AOT...\n");
     // for (auto& Section : Loader.Sections) {
     //   FEX::AOT::AOTGenSection(*ParentThread->Thread, CTX.get(), Section);
@@ -674,22 +647,18 @@ int main(int argc, char** argv, char** const envp) try {
 
     FHU::Filesystem::CreateDirectories("/tmp/fexcache");
     // TODO: Consider O_EXCL so that this fails to overwrite existing files?
-    auto Entry = SyscallHandler->LookupAOTIRCacheEntry(ParentThread->Thread, Loader.MainElfBase);
-    int fd = open(fextl::fmt::format("/tmp/fexcache/{}", Entry.GetCacheEntryId()).c_str(), O_CREAT | O_WRONLY, 0644);
-    CTX->FinalizeAOTIRCache(*ParentThread->Thread, fd, Loader.MainElfBase);
+    int fd = open(fextl::fmt::format("/tmp/fexcache/{}", Program.ProgramName).c_str(), O_CREAT | O_WRONLY, 0644);
+    CTX->FinalizeAOTIRCache(*ParentThread->Thread, fd);
     LogMan::Msg::IFmt("AOTIR Cache Stored");
     close(fd);
 
-    std::exit(0);
-    fextl::fmt::print(stderr, "... done running AOT. Waiting for CTRL+C\n");
+
+    fmt::print(stderr, "... done running AOT. Waiting for CTRL+C\n");
     while (true) {};
     // ERROR_AND_DIE_FMT("All good, terminating for debugging now");
   } else {
     CTX->ExecuteThread(ParentThread->Thread);
   }
-
-  LogMan::Msg::EFmt("Closing code dump FD");
-  close(CodeDumpFD);
 
   DebugServer.reset();
   SyscallHandler->TM.Stop();

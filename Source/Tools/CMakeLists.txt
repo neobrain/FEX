@@ -18,7 +18,6 @@ if (NOT MINGW_BUILD)
   add_subdirectory(FEXGetConfig/)
   add_subdirectory(FEXServer/)
   add_subdirectory(FEXBash/)
-  add_subdirectory(FEXOfflineCompiler/)
   add_subdirectory(CodeSizeValidation/)
   add_subdirectory(LinuxEmulation/)
 

@@ -4,7 +4,6 @@
 #include <shared_mutex>
 
 #include <FEXCore/IR/IR.h>
-#include <FEXCore/fextl/string.h>
 
 namespace FEXCore::IR {
 struct AOTIRCacheEntry;
@@ -52,8 +51,6 @@ struct AOTIRCacheEntryLookupResult {
     , VAFileStart(VAFileStart) {}
 
   AOTIRCacheEntryLookupResult(AOTIRCacheEntryLookupResult&&) = default;
-
-  fextl::string GetCacheEntryId() const;
 
   FEXCore::IR::AOTIRCacheEntry* Entry;
   uintptr_t VAFileStart;

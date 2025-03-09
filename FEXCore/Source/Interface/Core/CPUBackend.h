@@ -242,8 +242,7 @@ namespace CPU {
      * @return An executable function pointer relocated from the cache object
      */
     [[nodiscard]]
-    virtual void*
-    RelocateJITObjectCode(uint64_t Entry, std::span<std::byte> HostCode, std::span<const Relocation> Relocations, bool ForStorage) = 0;
+    virtual void* RelocateJITObjectCode(uint64_t Entry, std::span<const char> HostCode, std::span<const Relocation> Relocations) = 0;
 
     // TODO: Make pure virtual?
     virtual const fextl::vector<FEXCore::CPU::Relocation>& GetRelocations() const {
@@ -263,9 +262,6 @@ namespace CPU {
 
     // Returns true if the CodeBuffer changed
     bool CheckCodeBufferUpdate();
-
-    // TODO: Revisit this interface. For now, it just moves the cursor by the given number of bytes
-    virtual void ImportCode(uint64_t NumBytes) {};
 
   protected:
   public:

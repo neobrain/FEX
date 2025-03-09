@@ -99,19 +99,7 @@ struct ExecveAtArgs {
 
 uint64_t ExecveHandler(FEXCore::Core::CpuStateFrame* Frame, const char* pathname, char* const* argv, char* const* envp, ExecveAtArgs Args);
 
-class SyscallMmapInterface {
-public:
-  // does a mmap as if done via a guest syscall
-  virtual void* GuestMmap(FEXCore::Core::InternalThreadState* Thread, void* addr, size_t length, int prot, int flags, int fd, off_t offset) = 0;
-
-  // does a guest munmap as if done via a guest syscall
-  virtual int GuestMunmap(FEXCore::Core::InternalThreadState* Thread, void* addr, uint64_t length) = 0;
-};
-
-class SyscallHandler : public FEXCore::HLE::SyscallHandler,
-                       public SyscallMmapInterface,
-                       FEXCore::HLE::SourcecodeResolver,
-                       public FEXCore::Allocator::FEXAllocOperators {
+class SyscallHandler : public FEXCore::HLE::SyscallHandler, FEXCore::HLE::SourcecodeResolver, public FEXCore::Allocator::FEXAllocOperators {
 public:
   ThreadManager TM;
   FEX::HLE::SeccompEmulator SeccompEmulator;
@@ -248,6 +236,12 @@ public:
   FEX::HLE::MemAllocator* Get32BitAllocator() {
     return Alloc32Handler.get();
   }
+
+  // does a mmap as if done via a guest syscall
+  virtual void* GuestMmap(FEXCore::Core::InternalThreadState* Thread, void* addr, size_t length, int prot, int flags, int fd, off_t offset) = 0;
+
+  // does a guest munmap as if done via a guest syscall
+  virtual int GuestMunmap(FEXCore::Core::InternalThreadState* Thread, void* addr, uint64_t length) = 0;
 
   ///// Memory Manager tracking /////
   void TrackMmap(FEXCore::Core::InternalThreadState* Thread, uintptr_t Base, uintptr_t Size, int Prot, int Flags, int fd, off_t Offset);

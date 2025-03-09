@@ -334,9 +334,7 @@ namespace CPU {
       // Allocate initial CodeBuffer and return it
       CurrentCodeBuffer = manager.GetCurrentCodeBuffer();
     } else {
-#ifdef ENABLE_FEXCORE_PROFILER
       FEXTracyMessageL("Extending CodeBuffer");
-#endif
       auto NewCodeBufferSize = manager.GetCurrentCodeBufferSize();
       NewCodeBufferSize = std::min<size_t>(NewCodeBufferSize * 2.0, MaxCodeSize);
       CurrentCodeBuffer = manager.AllocateNewCodeBuffer(NewCodeBufferSize);
@@ -362,9 +360,7 @@ namespace CPU {
     auto NewCodeBuffer = manager.GetCurrentCodeBuffer();
     if (CurrentCodeBuffer != NewCodeBuffer) {
       fmt::print(stderr, "Moving to new CodeBuffer generation in thread {}.{}\n", ::getpid(), ::gettid());
-#ifdef ENABLE_FEXCORE_PROFILER
       FEXTracyMessageL("Updating CodeBuffer");
-#endif
 
       auto Prev = CurrentCodeBuffer;
       if (ThreadState->CurrentFrame->SignalHandlerRefCounter != 0) {
@@ -412,9 +408,7 @@ namespace CPU {
     : Size(Size) {
     codebuffermutex.AssertIsLocked();
     Ptr = static_cast<uint8_t*>(FEXCore::Allocator::VirtualAlloc(Size, true));
-#ifdef ENABLE_FEXCORE_PROFILER
     FEXTracyPlot("CodeBufferSize", static_cast<int64_t>(TotalCodeBufferSize += Size));
-#endif
     LOGMAN_THROW_A_FMT(!!Ptr, "Couldn't allocate code buffer");
     LookupCache = fextl::make_unique<SharedLookupCache>();
   }
@@ -431,10 +425,8 @@ namespace CPU {
   CodeBuffer::~CodeBuffer() {
     // TODO: Verify refcounts get appropriately released on forks!
     codebuffermutex.AssertIsLocked();
-#ifdef ENABLE_FEXCORE_PROFILER
     FEXTracyPlot("CodeBufferSize", static_cast<int64_t>(TotalCodeBufferSize -= Size));
     FEXTracyPlot("CodeBufferSizeUsed", static_cast<int64_t>(TotalCodeBufferSizeUsed) /** 100.f / TotalCodeBufferSize*/);
-#endif
 
     TotalCodeBufferSizeUsed -= UsedSize;
 
@@ -488,9 +480,7 @@ namespace CPU {
       }
     }
 
-#ifdef ENABLE_FEXCORE_PROFILER
     FEXTracyPlot("CodeBufferCount", static_cast<int64_t>(CodeBuffers.size()));
-#endif
     LogMan::Msg::IFmt("ALLOCATED CODEBUFFER OF SIZE {:#x}, now at {} in total\n", (int)Size, (int)CodeBuffers.size());
     return Buffer;
   }
@@ -498,9 +488,7 @@ namespace CPU {
   fextl::shared_ptr<CodeBuffer> CodeBufferManager::GetCurrentCodeBuffer() {
     codebuffermutex.AssertIsLocked();
     if (!Latest) {
-#ifdef ENABLE_FEXCORE_PROFILER
       FEXTracyMessageL("Creating first CodeBuffer");
-#endif
       // Made extra large to avoid resizing. TODO: Implement relocation of existing contents
       AllocateNewCodeBuffer(1024 * 1024 * 128); // TODO: Use InitialCodeSize instead
     }

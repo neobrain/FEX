@@ -16,8 +16,7 @@
 #include <thread>
 
 namespace FEX::AOT {
-void AOTGenSection(FEXCore::Core::InternalThreadState& ParentThread, FEXCore::Context::Context* CTX, ELFCodeLoader::LoadedSection& Section,
-                   fextl::set<uintptr_t> InitialBranchTargets) {
+void AOTGenSection(FEXCore::Context::Context* CTX, ELFCodeLoader::LoadedSection& Section) {
   // TODO: Constrain to specific object more cleanly
   // TODO: Ensure cross-section jumps are always long!
 
@@ -35,67 +34,62 @@ void AOTGenSection(FEXCore::Core::InternalThreadState& ParentThread, FEXCore::Co
     return;
   }
 
+  fextl::set<uintptr_t> InitialBranchTargets;
+
   // Load the ELF again with symbol parsing this time
   ELFLoader::ELFContainer container {Section.Filename, "", true};
 
   // Add symbols to the branch targets list
-  if (true) {
-    container.AddSymbols([&](ELFLoader::ELFSymbol* sym) {
-      auto Destination = sym->Address + Section.ElfBase;
+  container.AddSymbols([&](ELFLoader::ELFSymbol* sym) {
+    auto Destination = sym->Address + Section.ElfBase;
 
-      if (!(Destination >= Section.Base && Destination <= (Section.Base + Section.Size))) {
-        return; // outside of current section, unlikely to be real code
-      }
+    if (!(Destination >= Section.Base && Destination <= (Section.Base + Section.Size))) {
+      return; // outside of current section, unlikely to be real code
+    }
 
-      InitialBranchTargets.insert(Destination);
-    });
-  }
+    InitialBranchTargets.insert(Destination);
+  });
 
   LogMan::Msg::IFmt("Symbol seed: {}", InitialBranchTargets.size());
 
   // Add unwind entries to the branch target list
-  // TODO: This breaks Ender Lilies
-  if (false) {
-    container.AddUnwindEntries([&](uintptr_t Entry) {
-      auto Destination = Entry + Section.ElfBase;
+  container.AddUnwindEntries([&](uintptr_t Entry) {
+    auto Destination = Entry + Section.ElfBase;
 
-      if (!(Destination >= Section.Base && Destination <= (Section.Base + Section.Size))) {
-        return; // outside of current section, unlikely to be real code
-      }
+    if (!(Destination >= Section.Base && Destination <= (Section.Base + Section.Size))) {
+      return; // outside of current section, unlikely to be real code
+    }
 
-      InitialBranchTargets.insert(Destination);
-    });
-  }
+    InitialBranchTargets.insert(Destination);
+  });
 
   LogMan::Msg::IFmt("Symbol + Unwind seed: {}", InitialBranchTargets.size());
 
   // Scan the executable section and try to find function entries
-  if (false) {
-    for (size_t Offset = 0; Offset < (Section.Size - 16); Offset++) {
-      uint8_t* pCode = (uint8_t*)(Section.Base + Offset);
+  for (size_t Offset = 0; Offset < (Section.Size - 16); Offset++) {
+    uint8_t* pCode = (uint8_t*)(Section.Base + Offset);
 
-      // Possible CALL <disp32>
-      if (*pCode == 0xE8) {
-        uintptr_t Destination = (int)(pCode[1] | (pCode[2] << 8) | (pCode[3] << 16) | (pCode[4] << 24));
-        Destination += (uintptr_t)pCode + 5;
+    // Possible CALL <disp32>
+    if (*pCode == 0xE8) {
+      uintptr_t Destination = (int)(pCode[1] | (pCode[2] << 8) | (pCode[3] << 16) | (pCode[4] << 24));
+      Destination += (uintptr_t)pCode + 5;
 
-        auto DestinationPtr = (uint8_t*)Destination;
+      auto DestinationPtr = (uint8_t*)Destination;
 
-        if (!(Destination >= Section.Base && Destination <= (Section.Base + Section.Size))) {
-          continue; // outside of current section, unlikely to be real code
-        }
-
-        if (DestinationPtr[0] == 0 && DestinationPtr[1] == 0) {
-          continue; // add al, [rax], unlikely to be real code
-        }
-
-        InitialBranchTargets.insert(Destination);
+      if (!(Destination >= Section.Base && Destination <= (Section.Base + Section.Size))) {
+        continue; // outside of current section, unlikely to be real code
       }
 
-      // endbr64 marker marks an indirect branch destination
-      if (pCode[0] == 0xf3 && pCode[1] == 0x0f && pCode[2] == 0x1e && pCode[3] == 0xfa) {
-        InitialBranchTargets.insert((uintptr_t)pCode);
+      if (DestinationPtr[0] == 0 && DestinationPtr[1] == 0) {
+        continue; // add al, [rax], unlikely to be real code
       }
+
+      InitialBranchTargets.insert(Destination);
+    }
+
+    // endbr64 marker marks an indirect branch destination
+    if (pCode[0] == 0xf3 && pCode[1] == 0x0f && pCode[2] == 0x1e && pCode[3] == 0xfa) {
+      InitialBranchTargets.insert((uintptr_t)pCode);
     }
   }
 
@@ -124,8 +118,7 @@ void AOTGenSection(FEXCore::Core::InternalThreadState& ParentThread, FEXCore::Co
       setpriority(PRIO_PROCESS, FHU::Syscalls::gettid(), 19);
 
       // Setup thread - Each compilation thread uses its own backing FEX thread
-      // auto Thread = CTX->CreateThread(0, 0);
-      auto* Thread = &ParentThread;
+      auto Thread = CTX->CreateThread(0, 0);
       fextl::set<uint64_t> ExternalBranchesLocal;
       CTX->ConfigureAOTGen(Thread, &ExternalBranchesLocal, SectionMaxAddress);
 
@@ -157,15 +150,14 @@ void AOTGenSection(FEXCore::Core::InternalThreadState& ParentThread, FEXCore::Co
         ExternalBranchesLocal.clear();
       }
 
-      // TODO: Only for FEXServer...
-      // // Write cache to disk. Existing files are atomically replaced
-      // int fd = ::open("/tmp/fexcache.new", O_WRONLY | O_TRUNC);
-      // CTX->FinalizeAOTIRCache(*Thread, fd);
-      // close(fd);
-      // ::rename("/tmp/fexcache.new", "/tmp/fexcache");
+      // Write cache to disk. Existing files are atomically replaced
+      int fd = ::open("/tmp/fexcache.new", O_WRONLY | O_TRUNC);
+      CTX->FinalizeAOTIRCache(*Thread, fd);
+      close(fd);
+      ::rename("/tmp/fexcache.new", "/tmp/fexcache");
 
       // All entryproints processed, cleanup this thread
-      // CTX->DestroyThread(Thread);
+      CTX->DestroyThread(Thread);
       // This thread is now getting abandoned. Disable glibc allocator checking so glibc can safely cleanup its internal allocations.
       // FEXCore::Allocator::YesIKnowImNotSupposedToUseTheGlibcAllocator::HardDisable();
 

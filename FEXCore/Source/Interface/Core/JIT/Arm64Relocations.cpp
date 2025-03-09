@@ -28,7 +28,7 @@ void Arm64JITCore::InsertNamedThunkRelocation(ARMEmitter::Register Reg, const IR
   // Offset is the offset from the entrypoint of the block
   auto CurrentCursor = GetCursorAddress<uint8_t*>();
   // TODO: Switch back to BlockBegin
-  MoveABI.NamedThunkMove.Offset = GetCursorOffset();
+  MoveABI.NamedThunkMove.Offset = CurrentCursor - CodeData.BlockEntry;
   MoveABI.NamedThunkMove.Symbol = Sum;
   MoveABI.NamedThunkMove.RegisterIndex = Reg.Idx();
 
@@ -72,7 +72,7 @@ auto Arm64JITCore::InsertGuestRIPLiteral(uint64_t GuestRIP) -> NamedSymbolLitera
                          // TODO: Initialize properly, just setting value for debug now.
                          // .GuestEntryOffset = GuestRIP - Entry,
                          // .GuestEntryOffset = GuestRIP - Entry,
-                         .GuestRIP = GuestRIP /*- Entry*/},
+                         .GuestRIP = GuestRIP - Entry},
       },
   };
   return Lit;
@@ -84,13 +84,13 @@ void Arm64JITCore::PlaceNamedSymbolLiteral(NamedSymbolLiteralPair& Lit) {
   switch (Lit.MoveABI.Header.Type) {
   case RelocationTypes::RELOC_NAMED_SYMBOL_LITERAL: {
     // TODO: Switch back to BlockBegin
-    Lit.MoveABI.NamedSymbolLiteral.Offset = GetCursorOffset();
+    Lit.MoveABI.NamedSymbolLiteral.Offset = CurrentCursor - CodeData.BlockEntry;
     break;
   }
 
   case RelocationTypes::RELOC_GUEST_RIP_LITERAL: {
     // TODO: Switch back to BlockBegin
-    Lit.MoveABI.GuestRIPMove.Offset = GetCursorOffset();
+    Lit.MoveABI.GuestRIPMove.Offset = CurrentCursor - CodeData.BlockEntry;
     // fextl::fmt::print(stderr, "  EMITTING RELOCATION AT OFFSET {:#x} for guest rip {:#x} with literal {:#x}\n",
     //                   CurrentCursor - CodeData.BlockEntry, Lit.MoveABI.GuestRIPMove.GuestRIP + Entry, Lit.Lit);
     break;
@@ -110,8 +110,8 @@ void Arm64JITCore::InsertGuestRIPMove(ARMEmitter::Register Reg, uint64_t Constan
   // Offset is the offset from the entrypoint of the block
   auto CurrentCursor = GetCursorAddress<uint8_t*>();
   // TODO: BlockBegin?
-  MoveABI.GuestRIPMove.Offset = GetCursorOffset();
-  MoveABI.GuestRIPMove.GuestRIP = Constant;
+  MoveABI.GuestRIPMove.Offset = CurrentCursor - CodeData.BlockEntry;
+  MoveABI.GuestRIPMove.GuestRIP = Constant - Entry;
   MoveABI.GuestRIPMove.RegisterIndex = Reg.Idx();
 
   // fextl::fmt::print("  GENERATING GUEST_RIP_MOVE RELOC FROM {:#x}-{:#x} at OFFSET {:#x}\n", Constant, Entry, MoveABI.GuestRIPMove.Offset);
@@ -122,13 +122,13 @@ void Arm64JITCore::InsertGuestRIPMove(ARMEmitter::Register Reg, uint64_t Constan
   Relocations.emplace_back(MoveABI);
 }
 
-bool Arm64JITCore::ApplyRelocations(uint64_t GuestEntry, uint64_t CursorEntry, std::span<const Relocation> EntryRelocations, bool ForStorage) {
+bool Arm64JITCore::ApplyRelocations(uint64_t GuestEntry, uint64_t CodeEntry, uint64_t CursorEntry, std::span<const Relocation> EntryRelocations) {
   for (size_t j = 0; j < EntryRelocations.size(); ++j) {
     const FEXCore::CPU::Relocation& Reloc = EntryRelocations[j];
     // fextl::fmt::print(stderr, "RELOCATION {}: {}\n", j, ToUnderlying(Reloc.Header.Type));
     switch (Reloc.Header.Type) {
     case FEXCore::CPU::RelocationTypes::RELOC_NAMED_SYMBOL_LITERAL: {
-      uint64_t Pointer = ForStorage ? 0 : GetNamedSymbolLiteral(Reloc.NamedSymbolLiteral.Symbol);
+      uint64_t Pointer = GetNamedSymbolLiteral(Reloc.NamedSymbolLiteral.Symbol);
       // Relocation occurs at the cursorEntry + offset relative to that cursor
       SetCursorOffset(CursorEntry + Reloc.NamedSymbolLiteral.Offset);
 
@@ -138,7 +138,7 @@ bool Arm64JITCore::ApplyRelocations(uint64_t GuestEntry, uint64_t CursorEntry, s
       break;
     }
     case FEXCore::CPU::RelocationTypes::RELOC_NAMED_THUNK_MOVE: {
-      uint64_t Pointer = ForStorage ? 0 : reinterpret_cast<uint64_t>(EmitterCTX->ThunkHandler->LookupThunk(Reloc.NamedThunkMove.Symbol));
+      uint64_t Pointer = reinterpret_cast<uint64_t>(EmitterCTX->ThunkHandler->LookupThunk(Reloc.NamedThunkMove.Symbol));
       if (Pointer == ~0ULL) {
         return false;
       }
@@ -149,8 +149,10 @@ bool Arm64JITCore::ApplyRelocations(uint64_t GuestEntry, uint64_t CursorEntry, s
       break;
     }
     case FEXCore::CPU::RelocationTypes::RELOC_GUEST_RIP_MOVE: {
+      // fextl::fmt::print(stderr, "  at {:#x}: RIP_MOVE {:#x}-{:#x} (at host {:#x})\n", Reloc.GuestRIPMove.Offset,
+      //                   Reloc.GuestRIPMove.GuestRIP - GuestEntry, GuestEntry, CursorEntry + Reloc.GuestRIPMove.Offset);
+
       // TODO: In particular, should assert the RIP is still in the same library!
-      // TODO: This often comes up for GOT/PLT tables... is the offset always fixed?
       uint64_t Pointer = Reloc.GuestRIPMove.GuestRIP + GuestEntry;
 
       // Re-emit constant in case it requires more/fewer instructions at the new location
