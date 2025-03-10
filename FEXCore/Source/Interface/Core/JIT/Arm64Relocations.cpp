@@ -165,7 +165,7 @@ bool Arm64JITCore::ApplyRelocations(uint64_t GuestEntry, uint64_t CursorEntry, s
       // fextl::fmt::print(stderr, "  GUEST_RIP_LITERAL patching host addr {:#x} / {:#x}: RIP delta {:#x} -> {:#x}\n", Reloc.GuestRIPMove.Offset,
       //                   CodeEntry + Reloc.GuestRIPMove.Offset, Reloc.GuestRIPMove.GuestRIP, GuestEntry + Reloc.GuestRIPMove.GuestRIP);
       SetCursorOffset(CursorEntry + Reloc.GuestRIPMove.Offset);
-      dc64(GuestEntry + Reloc.GuestRIPMove.GuestRIP);
+      dc64((GuestEntry + Reloc.GuestRIPMove.GuestRIP) & (CTX->Config.Is64BitMode() ? 0xffff'ffff'ffff'ffff : 0xffff'ffff));
       break;
     }
     default: ERROR_AND_DIE_FMT("Unknown relocation type {}", ToUnderlying(Reloc.Header.Type));
