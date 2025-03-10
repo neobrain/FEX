@@ -76,6 +76,10 @@ $end_info$
 #include <utility>
 #include <xxhash.h>
 
+extern "C" {
+extern int CodeDumpFD;
+}
+
 namespace FEXCore::CPU {
 extern mymutex codebuffermutex;
 }
@@ -489,6 +493,10 @@ void ContextImpl::UnlockAfterFork(FEXCore::Core::InternalThreadState* LiveThread
 
   Profiler::PostForkAction(Child);
   if (Child) {
+    // TODO: Reopen with new PID
+    // TODO: Also add this FD to monitored FD list
+    close(std::exchange(CodeDumpFD, -1));
+
     CodeInvalidationMutex.StealAndDropActiveLocks();
     if (Config.StrictInProcessSplitLocks) {
       StrictSplitLockMutex = 0;
