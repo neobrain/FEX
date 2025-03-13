@@ -3,7 +3,7 @@
     "CPU": {
       "Multiblock": {
         "Type": "bool",
-        "Default": "true",
+        "Default": "false",
         "ShortArg": "m",
         "Desc": [
           "Controls multiblock code compilation",
