@@ -227,6 +227,12 @@ int GenerateCache(int argc, const char** argv) {
   // TODO: OS_GENERIC?
   SyscallOSABI = Loader.Is64BitMode() ? FEXCore::HLE::SyscallOSABI::OS_LINUX64 : FEXCore::HLE::SyscallOSABI::OS_LINUX32;
 
+  if (!Loader.Is64BitMode()) {
+    // This has a couple of issues that need to be fixed
+    fmt::print("Cache generation for 32-bit not supported yet\n");
+    return 0;
+  }
+
   // Load HostFeatures
   // NOTE: Config must be fully initialized for detection to work
   FEXCore::HostFeatures HostFeatures {};
