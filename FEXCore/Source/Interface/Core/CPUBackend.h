@@ -9,6 +9,7 @@ $end_info$
 #pragma once
 
 #include <FEXCore/Utils/CompilerDefs.h>
+#include <FEXCore/fextl/robin_map.h>
 #include <FEXCore/fextl/string.h>
 #include <FEXCore/fextl/vector.h>
 
@@ -136,7 +137,9 @@ namespace CPU {
      * @return An executable function pointer relocated from the cache object
      */
     [[nodiscard]]
-    virtual void* RelocateJITObjectCode(uint64_t Entry, std::span<const char> HostCode, std::span<const Relocation> Relocations) = 0;
+    virtual void* RelocateJITObjectCode(uint64_t Entry, std::span<char> HostCode, std::span<const Relocation> Relocations) = 0;
+
+    virtual void WriteCodeDump(int FD, uint64_t FileBase, fextl::robin_map<uint64_t, uint64_t> BlockList) = 0;
 
     virtual void ClearCache() {}
 

@@ -974,6 +974,9 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
   this->IR = nullptr;
 
   if (CodeDumpFD != -1) {
+    static std::mutex mutmut;
+    std::unique_lock lk(mutmut);
+
     auto Region = CTX->SyscallHandler->LookupAOTIRCacheEntry(ThreadState, Entry);
     if (Region.Entry) {
       write(CodeDumpFD, Region.Entry->Filename.c_str(), Region.Entry->Filename.size() + 1);
@@ -986,7 +989,119 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
   return CodeData;
 }
 
-void* Arm64JITCore::RelocateJITObjectCode(uint64_t Entry, std::span<const char> HostCode, std::span<const Relocation> Relocations) {
+void Arm64JITCore::WriteCodeDump(int FD, uint64_t FileBase, fextl::robin_map<uint64_t, uint64_t> BlockList_) {
+  fextl::unordered_map<uint64_t, std::string> RelocatedInstrs;
+
+  for (auto& Reloc : Relocations) {
+    switch (Reloc.Header.Type) {
+    case FEXCore::CPU::RelocationTypes::RELOC_GUEST_RIP_MOVE:
+    case FEXCore::CPU::RelocationTypes::RELOC_GUEST_RIP_LITERAL:
+      Reloc.GuestRIPMove.GuestRIP -= FileBase;
+      RelocatedInstrs.emplace(Reloc.GuestRIPMove.Offset, fextl::fmt::format("= LOAD VALUE GUEST_OFFSET {:#x}", Reloc.GuestRIPMove.GuestRIP));
+      break;
+
+    case FEXCore::CPU::RelocationTypes::RELOC_NAMED_SYMBOL_LITERAL: {
+      RelocatedInstrs.emplace(Reloc.NamedSymbolLiteral.Offset, "EXITFUNCTION_LINKER");
+      break;
+    }
+
+    case FEXCore::CPU::RelocationTypes::RELOC_NAMED_THUNK_MOVE: {
+      RelocatedInstrs.emplace(Reloc.NamedThunkMove.Offset, "THUNK");
+      break;
+    }
+    default: ERROR_AND_DIE_FMT("Unknown relocation type {}", ToUnderlying(Reloc.Header.Type));
+    }
+  }
+
+  std::map BlockList {BlockList_.begin(), BlockList_.end()};
+
+  if (BlockList.empty()) {
+    ERROR_AND_DIE_FMT("TODO: No blocks found");
+  }
+
+  auto LastBlockIt = std::prev(BlockList.end());
+  auto FullSize = GetCursorAddress<uint8_t*>() - BufferBase;
+
+  std::vector<char> CodeBufferData(FullSize);
+  if (FullSize) {
+    memcpy(CodeBufferData.data(), BufferBase, FullSize);
+  }
+  (void)RelocateJITObjectCode(FileBase, CodeBufferData, Relocations /*, true*/);
+  auto HostBase = CodeBufferData.data();
+
+  for (auto [GuestRIP, HostAddr] : BlockList) {
+    HostAddr += CodeBufferData.data() - reinterpret_cast<char*>(BufferBase);
+
+    JITCodeHeader CodeHeader;
+    JITCodeTail CodeTail;
+    memcpy(&CodeHeader, reinterpret_cast<void*>(HostAddr - sizeof(JITCodeHeader)), sizeof(JITCodeHeader));
+    memcpy(&CodeTail, reinterpret_cast<void*>(HostAddr - sizeof(JITCodeHeader) + CodeHeader.OffsetToBlockTail), sizeof(JITCodeTail));
+    const CompiledCode CompiledCode {.BlockBegin = reinterpret_cast<uint8_t*>(HostAddr - sizeof(JITCodeHeader)),
+                                     .BlockEntry = reinterpret_cast<uint8_t*>(HostAddr),
+                                     .Size = CodeTail.Size};
+
+    uint64_t NeutralGuestBase = /*FileBase*/ GuestRIP - FileBase;
+    {
+      auto Output = fextl::fmt::format("Block +{:#x}-{:#x}:\n", GuestRIP - FileBase, GuestRIP - FileBase + CompiledCode.Size);
+
+      write(FD, Output.data(), Output.size());
+    }
+
+    // Dump IR
+    if (false) {
+      fextl::stringstream ss;
+      FEXCore::IR::Dump(&ss, IR, RAData);
+      auto str = std::move(ss).str();
+      write(FD, str.data(), str.size());
+    }
+
+    // Dump raw guest x86 code
+    {
+      auto Output = fextl::fmt::format("{:02x}\n", fmt::join((uint8_t*)GuestRIP, (uint8_t*)GuestRIP + CompiledCode.Size, ""));
+      write(FD, Output.data(), Output.size());
+    }
+
+    auto CodeBufferData = std::span {CompiledCode.BlockBegin, CompiledCode.Size};
+
+    {
+      csh handle;
+      cs_open(CS_ARCH_ARM64, CS_MODE_ARM, &handle);
+      // TODO: Include JIT preamble
+      auto PCToDecode = (const uint32_t*)(CodeBufferData.data() + (CompiledCode.BlockEntry - CompiledCode.BlockBegin));
+      cs_insn* insn = cs_malloc(handle);
+      for (uint64_t Offset = 0; PCToDecode < (const uint32_t*)(CodeBufferData.data() + CompiledCode.Size); Offset += 4, ++PCToDecode) {
+        fextl::string Output;
+
+        if (Offset + sizeof(JITCodeHeader) == CodeHeader.OffsetToBlockTail) {
+          Output += "JIT block tail:\n";
+        }
+
+        if (Offset + sizeof(JITCodeHeader) == CodeHeader.OffsetToBlockTail + CodeTail.OffsetToRIPEntries) {
+          Output += "JIT RIP entries:\n";
+        }
+        const uint8_t* current = (const uint8_t*)PCToDecode;
+        size_t size = 4;
+        uint64_t address = NeutralGuestBase;
+        if (cs_disasm_iter(handle, &current, &size, &address, insn)) {
+          Output += fextl::fmt::format("+{:08x}: {:08x} {} {}{}\n", Offset, *PCToDecode, insn->mnemonic, insn->op_str,
+                                       RelocatedInstrs.contains((const char*)PCToDecode - HostBase) ?
+                                         (" <-- RELOCATED " + RelocatedInstrs.at((const char*)PCToDecode - HostBase)) :
+                                         "");
+        } else {
+          Output += fextl::fmt::format("+{:08x}: {:08x} (unknown instruction){}\n", Offset, *PCToDecode,
+                                       RelocatedInstrs.contains((const char*)PCToDecode - HostBase) ?
+                                         (" <-- RELOCATED " + RelocatedInstrs.at((const char*)PCToDecode - HostBase)) :
+                                         "");
+        }
+        write(FD, Output.data(), Output.size());
+      }
+      cs_free(insn, 1);
+    }
+    write(FD, "\n", 1);
+  }
+}
+
+void* Arm64JITCore::RelocateJITObjectCode(uint64_t Entry, std::span<char> HostCode, std::span<const Relocation> Relocations) {
   if (GetCursorOffset() + HostCode.size_bytes() + sizeof(JITCodeHeader) + sizeof(JITCodeTail) > CurrentCodeBuffer->Size) {
     CTX->ClearCodeCache(ThreadState);
   }
@@ -998,7 +1113,7 @@ void* Arm64JITCore::RelocateJITObjectCode(uint64_t Entry, std::span<const char> 
 
   memcpy(RelocatedCode, HostCode.data(), HostCode.size_bytes());
 
-  auto success = ApplyRelocations(Entry, reinterpret_cast<uintptr_t>(RelocatedCode), GetCursorOffset(), Relocations);
+  auto success = ApplyRelocations(true ? 0 : Entry, reinterpret_cast<uintptr_t>(RelocatedCode), GetCursorOffset(), Relocations);
   if (!success) {
     SetCursorOffset(RelocatedCodeBeginOffset);
     return nullptr;
@@ -1035,10 +1150,7 @@ void* Arm64JITCore::RelocateJITObjectCode(uint64_t Entry, std::span<const char> 
     CursorIncrement(sizeof(JITCodeTail));
   }
 
-  // TODO: Drop use of vixl
-  // vixl::aarch64::CPU::EnsureIAndDCacheCoherency(reinterpret_cast<void*>(RelocatedCode), HostCode.size_bytes());
-  ClearICache(reinterpret_cast<void*>(RelocatedCode), HostCode.size_bytes());
-
+  memcpy(HostCode.data(), RelocatedCode, HostCode.size_bytes());
 
   return RelocatedCode;
 }

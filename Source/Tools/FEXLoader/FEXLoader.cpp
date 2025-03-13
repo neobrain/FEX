@@ -635,24 +635,6 @@ int main(int argc, char** argv, char** const envp) {
   DebugServer.reset();
   SyscallHandler->TM.Stop();
 
-  if (AOTEnabled) {
-    if (FHU::Filesystem::CreateDirectories(fextl::fmt::format("{}/aotir", FEXCore::Config::GetDataDirectory()))) {
-      CTX->WriteFilesWithCode([](const fextl::string& fileid, const fextl::string& filename) {
-        const auto filepath = fextl::fmt::format("{}/aotir/{}.path", FEXCore::Config::GetDataDirectory(), fileid);
-        int fd = open(filepath.c_str(), O_CREAT | O_EXCL | O_WRONLY, 0644);
-        if (fd != -1) {
-          write(fd, filename.c_str(), filename.size());
-          close(fd);
-        }
-      });
-    }
-
-    if (AOTIRCapture() || AOTIRGenerate()) {
-      CTX->FinalizeAOTIRCache();
-      LogMan::Msg::IFmt("AOTIR Cache Stored");
-    }
-  }
-
   auto ProgramStatus = ParentThread->StatusCode;
 
   SignalDelegation->UninstallTLSState(ParentThread);

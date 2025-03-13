@@ -17,6 +17,7 @@ $end_info$
 #include <FEXCore/Core/CoreState.h>
 #include <FEXCore/IR/IR.h>
 #include <FEXCore/fextl/map.h>
+#include <FEXCore/fextl/robin_map.h>
 #include <FEXCore/fextl/string.h>
 #include <FEXCore/fextl/vector.h>
 
@@ -43,7 +44,9 @@ public:
               const FEXCore::IR::RegisterAllocationData* RAData, bool CheckTF) override;
 
   [[nodiscard]]
-  void* RelocateJITObjectCode(uint64_t Entry, std::span<const char> HostCode, std::span<const Relocation> Relocations) override;
+  void* RelocateJITObjectCode(uint64_t Entry, std::span<char> HostCode, std::span<const Relocation> Relocations) override;
+
+  void WriteCodeDump(int FD, uint64_t FileBase, fextl::robin_map<uint64_t, uint64_t> BlockList) override;
 
   void ClearCache() override;
 

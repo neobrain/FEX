@@ -252,8 +252,10 @@ private:
   fextl::unique_ptr<std::pmr::polymorphic_allocator<std::byte>> BlockLinks_pma;
   BlockLinksMapType* BlockLinks;
 
+public:
   fextl::robin_map<uint64_t, uint64_t> BlockList;
 
+private:
   size_t TotalCacheSize;
 
   constexpr static size_t CODE_SIZE = 128 * 1024 * 1024;

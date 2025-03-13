@@ -55,6 +55,8 @@ $end_info$
 #include <FEXHeaderUtils/TodoDefines.h>
 #include <FEXHeaderUtils/Filesystem.h>
 
+#include <capstone/capstone.h>
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -779,6 +781,16 @@ ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalT
   };
 }
 
+void ContextImpl::FinalizeAOTIRCache(FEXCore::Core::InternalThreadState& Thread, int fd, uint64_t BaseGuestEntry) {
+  auto SourceBinary = SyscallHandler->LookupAOTIRCacheEntry(&Thread, BaseGuestEntry);
+  if (!SourceBinary.Entry) {
+    fmt::print(stderr, "Skipping cache write-out since no backing binary was found\n");
+    return;
+  }
+
+  Thread.CPUBackend->WriteCodeDump(fd, BaseGuestEntry, Thread.LookupCache->BlockList);
+}
+
 uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_t GuestRIP, uint64_t MaxInst) {
   auto Thread = Frame->Thread;
   FEXCORE_PROFILE_SCOPED("CompileBlock");
@@ -842,7 +854,7 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
   }
 
   // Clear any relocations that might have been generated
-  Thread->CPUBackend->ClearRelocations();
+  // Thread->CPUBackend->ClearRelocations();
 
   if (IRCaptureCache.PostCompileCode(Thread, CodePtr, GuestRIP, StartAddr, Length, {}, DebugData.get(), false)) {
     // Early exit

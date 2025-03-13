@@ -160,9 +160,7 @@ public:
     IRCaptureCache.SetAOTIRRenamer(std::move(CacheRenamer));
   }
 
-  void FinalizeAOTIRCache() override {
-    IRCaptureCache.FinalizeAOTIRCache();
-  }
+  void FinalizeAOTIRCache(FEXCore::Core::InternalThreadState&, int fd, uint64_t BaseGuestEntry) override;
   void WriteFilesWithCode(AOTIRCodeFileWriterFn Writer) override {
     IRCaptureCache.WriteFilesWithCode(Writer);
   }
