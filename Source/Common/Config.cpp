@@ -21,12 +21,7 @@
 
 namespace FEX::Config {
 namespace JSON {
-  static void LoadJSonConfig(const fextl::string& Config, std::function<void(const char* Name, const char* ConfigSring)> Func) {
-    fextl::vector<char> Data;
-    if (!FEXCore::FileLoading::LoadFile(Data, Config)) {
-      return;
-    }
-
+  static void LoadJSonConfig(fextl::vector<char> Data, std::function<void(const char* Name, const char* ConfigSring)> Func) {
     FEX::JSON::JsonAllocator Pool {};
     const json_t* json = FEX::JSON::CreateJSON(Data, Pool);
 
@@ -58,6 +53,15 @@ namespace JSON {
 
       Func(ConfigName, ConfigString);
     }
+  }
+
+  static void LoadJSonConfig(const fextl::string& Config, std::function<void(const char* Name, const char* ConfigSring)> Func) {
+    fextl::vector<char> Data;
+    if (!FEXCore::FileLoading::LoadFile(Data, Config)) {
+      return;
+    }
+
+    LoadJSonConfig(Data, std::move(Func));
   }
 } // namespace JSON
 
@@ -154,11 +158,12 @@ public:
   explicit MainLoader(FEXCore::Config::LayerType Type);
   explicit MainLoader(fextl::string ConfigFile);
   explicit MainLoader(FEXCore::Config::LayerType Type, std::string_view ConfigFile);
+  explicit MainLoader(fextl::vector<char> ConfigData);
 
   void Load() override;
 
 private:
-  fextl::string Config;
+  std::variant<fextl::string, fextl::vector<char>> Config;
 };
 
 class AppLoader final : public OptionMapper {
@@ -215,10 +220,19 @@ MainLoader::MainLoader(fextl::string ConfigFile)
 
 MainLoader::MainLoader(FEXCore::Config::LayerType Type, std::string_view ConfigFile)
   : OptionMapper(Type)
-  , Config {ConfigFile} {}
+  , Config {fextl::string {ConfigFile}} {}
+
+MainLoader::MainLoader(fextl::vector<char> ConfigData)
+  : OptionMapper(FEXCore::Config::LayerType::LAYER_MAIN)
+  , Config {std::move(ConfigData)} {}
 
 void MainLoader::Load() {
-  JSON::LoadJSonConfig(Config, [this](const char* Name, const char* ConfigString) { MapNameToOption(Name, ConfigString); });
+  if (auto ConfigPath = std::get_if<fextl::string>(&Config)) {
+    JSON::LoadJSonConfig(*ConfigPath, [this](const char* Name, const char* ConfigString) { MapNameToOption(Name, ConfigString); });
+  } else {
+    const auto& ConfigData = std::get<fextl::vector<char>>(Config);
+    JSON::LoadJSonConfig(ConfigData, [this](const char* Name, const char* ConfigString) { MapNameToOption(Name, ConfigString); });
+  }
 }
 
 AppLoader::AppLoader(const fextl::string& Filename, FEXCore::Config::LayerType Type)
@@ -302,6 +316,10 @@ fextl::unique_ptr<FEXCore::Config::Layer> CreateMainLayer(const fextl::string* F
   } else {
     return fextl::make_unique<MainLoader>(FEXCore::Config::LayerType::LAYER_MAIN);
   }
+}
+
+fextl::unique_ptr<FEXCore::Config::Layer> CreateMainLayer(fextl::vector<char> FileData) {
+  return fextl::make_unique<MainLoader>(FileData);
 }
 
 fextl::unique_ptr<FEXCore::Config::Layer> CreateUserOverrideLayer(std::string_view AppConfig) {
