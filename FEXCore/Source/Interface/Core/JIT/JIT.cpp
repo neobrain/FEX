@@ -973,109 +973,15 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
 
   this->IR = nullptr;
 
-  auto GuestRIP = Entry;
-  auto& CompiledCode = CodeData;
-
-  uint64_t NeutralGuestBase = 0x123000;
-  {
-    auto Region = CTX->SyscallHandler->LookupAOTIRCacheEntry(ThreadState, GuestRIP);
-    auto Output = fextl::fmt::format("Guest block +{:#x}-{:#x} in {} ({:#x} -> {}):\n", GuestRIP - Region.VAFileStart,
-                                     GuestRIP - Region.VAFileStart + Size, Region.Entry ? Region.Entry->Filename : "UNKNOWN", GuestRIP,
-                                     fmt::ptr(CompiledCode.BlockBegin));
-
-    NeutralGuestBase = GuestRIP - Region.VAFileStart;
-
-    write(CodeDumpFD, Output.data(), Output.size());
-  }
-
-  // Dump IR
-  if (false) {
-    fextl::stringstream ss;
-    FEXCore::IR::Dump(&ss, IR, RAData);
-    auto str = std::move(ss).str();
-    write(CodeDumpFD, str.data(), str.size());
-  }
-
-  // Dump raw guest x86 code
-  {
-    auto Output = fextl::fmt::format("{:02x}\n", fmt::join((uint8_t*)GuestRIP, (uint8_t*)GuestRIP + Size, ""));
-    write(CodeDumpFD, Output.data(), Output.size());
-  }
-
-  fextl::unordered_map<uint64_t, std::string> RelocatedInstrs;
-
-  const auto OldCursor = GetCursorOffset();
-  const auto PatchCursor = GetCursorOffset() + (CompiledCode.BlockEntry - CompiledCode.BlockBegin);
-  memcpy(GetCursorAddress<void*>(), CompiledCode.BlockBegin, CompiledCode.Size);
-  for (auto& Reloc : Relocations) {
-    switch (Reloc.Header.Type) {
-    case FEXCore::CPU::RelocationTypes::RELOC_NAMED_SYMBOL_LITERAL: {
-      if (Reloc.NamedSymbolLiteral.Symbol != RelocNamedSymbolLiteral::NamedSymbol::SYMBOL_LITERAL_EXITFUNCTION_LINKER) {
-        ERROR_AND_DIE_FMT("Unknown named literal symbol");
-      }
-      RelocatedInstrs.emplace(Reloc.NamedSymbolLiteral.Offset, "EXITFUNCTION_LINKER");
-      SetCursorOffset(PatchCursor + Reloc.NamedSymbolLiteral.Offset);
-      dc64(0);
-      break;
-    }
-
-    case FEXCore::CPU::RelocationTypes::RELOC_NAMED_THUNK_MOVE: {
-      RelocatedInstrs.emplace(Reloc.NamedThunkMove.Offset, "THUNK");
-      SetCursorOffset(PatchCursor + Reloc.NamedThunkMove.Offset);
-      LoadConstant(ARMEmitter::Size::i64Bit, ARMEmitter::Register(Reloc.NamedThunkMove.RegisterIndex), 0, true);
-      break;
-    }
-    case FEXCore::CPU::RelocationTypes::RELOC_GUEST_RIP_MOVE: {
-      uint64_t Pointer = Reloc.GuestRIPMove.GuestRIP + NeutralGuestBase;
-      RelocatedInstrs.emplace(Reloc.GuestRIPMove.Offset, fextl::fmt::format("= LOAD VALUE GUEST_OFFSET {:#x}", Reloc.GuestRIPMove.GuestRIP));
-      SetCursorOffset(PatchCursor + Reloc.GuestRIPMove.Offset);
-      LoadConstant(ARMEmitter::Size::i64Bit, ARMEmitter::Register(Reloc.GuestRIPMove.RegisterIndex), Pointer, true);
-      break;
-    }
-
-    case FEXCore::CPU::RelocationTypes::RELOC_GUEST_RIP_LITERAL: {
-      RelocatedInstrs.emplace(Reloc.GuestRIPMove.Offset, fextl::fmt::format("= GUEST_OFFSET {:#x}", Reloc.GuestRIPMove.GuestRIP));
-      SetCursorOffset(PatchCursor + Reloc.GuestRIPMove.Offset);
-      dc64(NeutralGuestBase + Reloc.GuestRIPMove.GuestRIP);
-      break;
-    }
-    default: ERROR_AND_DIE_FMT("Unknown relocation type {}", ToUnderlying(Reloc.Header.Type));
+  if (CodeDumpFD != -1) {
+    auto Region = CTX->SyscallHandler->LookupAOTIRCacheEntry(ThreadState, Entry);
+    if (Region.Entry) {
+      write(CodeDumpFD, Region.Entry->Filename.c_str(), Region.Entry->Filename.size() + 1);
+      auto Offset = Entry - Region.VAFileStart;
+      write(CodeDumpFD, &Offset, sizeof(Offset));
+      write(CodeDumpFD, &Size, sizeof(Size));
     }
   }
-  SetCursorOffset(OldCursor);
-
-  {
-    csh handle;
-    cs_open(CS_ARCH_ARM64, CS_MODE_ARM, &handle);
-    // TODO: Thread-safety
-    // TODO: Include JIT preamble
-    auto PCToDecode = (const uint32_t*)(GetCursorAddress<char*>() + (CompiledCode.BlockEntry - CompiledCode.BlockBegin));
-    cs_insn* insn = cs_malloc(handle);
-    for (uint64_t Offset = 0; PCToDecode < (const uint32_t*)(GetCursorAddress<char*>() + CompiledCode.Size); Offset += 4, ++PCToDecode) {
-      fextl::string Output;
-      if (Offset == JITBlockTailLocation - CodeData.BlockBegin) {
-        Output += "JIT block tail:\n";
-      }
-
-      if (Offset == JITRIPEntriesBegin - CodeData.BlockBegin) {
-        Output += "JIT RIP entries:\n";
-      }
-      const uint8_t* current = (const uint8_t*)PCToDecode;
-      size_t size = 4;
-      uint64_t address = NeutralGuestBase;
-      if (cs_disasm_iter(handle, &current, &size, &address, insn)) {
-        Output += fextl::fmt::format("+{:08x}: {:08x} {} {}{}\n", Offset, *PCToDecode, insn->mnemonic, insn->op_str,
-                                     RelocatedInstrs.contains(Offset) ? (" <-- RELOCATED " + RelocatedInstrs.at(Offset)) : "");
-      } else {
-        Output += fextl::fmt::format("+{:08x}: {:08x} (unknown instruction){}\n", Offset, *PCToDecode,
-                                     RelocatedInstrs.contains(Offset) ? (" <-- RELOCATED " + RelocatedInstrs.at(Offset)) : "");
-      }
-      write(CodeDumpFD, Output.data(), Output.size());
-    }
-    cs_free(insn, 1);
-  }
-  write(CodeDumpFD, "\n", 1);
-
 
   return CodeData;
 }
