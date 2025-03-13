@@ -153,6 +153,8 @@ int GenerateCache(int argc, const char** argv) {
   Parser.add_option("--codemap").help("Path to code map");
   Parser.add_option("--limit").action("store_true").help("Limit processing to the given binary");
 
+  Parser.add_option("--config").help("JSON data to override default configuration");
+
   optparse::Values Options = Parser.parse_args(argc, argv);
   if (Parser.args().size() != 1) {
     Parser.print_usage();
@@ -203,15 +205,18 @@ int GenerateCache(int argc, const char** argv) {
 
   // TODO: Support compiling from an FD
 
-  // TODO: Generate substitute config?
-  FEX::Config::InitializeConfigs({});
   FEXCore::Config::Initialize();
 
-  // TODO: From command line
-  FEXCore::Config::EraseSet(FEXCore::Config::CONFIG_MULTIBLOCK, "0");
+  if (Options.is_set("config")) {
+    fextl::string ConfigData = static_cast<fextl::string>(Options.get("config"));
+    FEXCore::Config::AddLayer(FEX::Config::CreateMainLayer(fextl::vector<char> {ConfigData.begin(), ConfigData.end()}));
+  }
 
   // TODO: Consider re-enabling it for code statistics
   FEXCore::Config::EraseSet(FEXCore::Config::CONFIG_DISABLETELEMETRY, "1");
+
+  FEXCore::Config::Load();
+
 
   ELFCodeLoader Loader {ProgramName, -1, "", {ProgramName}, {}, {}, nullptr, true /* skip interpreter */};
   FEXCore::Config::EraseSet(FEXCore::Config::CONFIG_IS64BIT_MODE, Loader.Is64BitMode() ? "1" : "0");
@@ -230,6 +235,7 @@ int GenerateCache(int argc, const char** argv) {
     memcpy(reinterpret_cast<char*>(&HostFeatures) + offsetof(FEXCore::HostFeatures, ICacheLineSize) + sizeof(HostFeatures.ICacheLineSize),
            &RawValue, sizeof(RawValue));
   } else {
+    fmt::print("Auto-detecting host CPU features\n");
     memcpy(reinterpret_cast<char*>(&HostFeatures) + offsetof(FEXCore::HostFeatures, ICacheLineSize) + sizeof(HostFeatures.ICacheLineSize),
            reinterpret_cast<const char*>(&DetectedFeatures) + offsetof(FEXCore::HostFeatures, ICacheLineSize) + sizeof(HostFeatures.ICacheLineSize),
            sizeof(uint32_t));
@@ -237,11 +243,13 @@ int GenerateCache(int argc, const char** argv) {
   if (Options.is_set("host-dcache-line-size")) {
     HostFeatures.DCacheLineSize = Options.get("host-dcache-line-size");
   } else {
+    fmt::print("Auto-detecting host CPU data cache line size\n");
     HostFeatures.DCacheLineSize = DetectedFeatures.DCacheLineSize;
   }
   if (Options.is_set("host-icache-line-size")) {
     HostFeatures.ICacheLineSize = Options.get("host-icache-line-size");
   } else {
+    fmt::print("Auto-detecting host CPU instruction cache line size\n");
     HostFeatures.ICacheLineSize = DetectedFeatures.ICacheLineSize;
   }
   HostFeatures = DetectedFeatures;
@@ -318,7 +326,6 @@ int GenerateCache(int argc, const char** argv) {
   const auto SMCChecks = Options.is_set("smc") ? static_cast<FEXCore::Config::ConfigSMCChecks>(static_cast<long>(Options.get("smc"))) :
                                                  FEXCore::Config::CONFIG_SMC_NONE;
 
-  // TODO: From command line
   FEX_CONFIG_OPT(TSOEnabled, TSOENABLED);
   if (TSOEnabled) {
     CTX->SetHardwareTSOSupport(true);
