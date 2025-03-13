@@ -45,7 +45,7 @@ extern "C" {
 int CodeDumpFD = -1;
 }
 
-static constexpr size_t INITIAL_CODE_SIZE = 1024 * 1024 * 16;
+extern "C" size_t INITIAL_CODE_SIZE = 1024 * 1024 * 16;
 // We don't want to move above 128MB atm because that means we will have to encode longer jumps
 static constexpr size_t MAX_CODE_SIZE = 1024 * 1024 * 128;
 

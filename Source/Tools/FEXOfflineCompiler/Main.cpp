@@ -142,6 +142,10 @@ int CombineCodeMaps(int argc, const char** argv) {
   return 0;
 }
 
+extern "C" {
+extern size_t INITIAL_CODE_SIZE;
+}
+
 int GenerateCache(int argc, const char** argv) {
   optparse::OptionParser Parser {};
   Parser.add_option("--host-dcache-line-size").type("long").help("Target DCache line size to use when compiling code (default: detect from host)");
@@ -273,6 +277,8 @@ int GenerateCache(int argc, const char** argv) {
   }
 
   FEXCore::Context::InitializeStaticTables(Loader.Is64BitMode() ? FEXCore::Context::MODE_64BIT : FEXCore::Context::MODE_32BIT);
+
+  INITIAL_CODE_SIZE = 1024 * 1024 * 1280;
 
   auto CTX = FEXCore::Context::Context::CreateNewContext(HostFeatures);
 
