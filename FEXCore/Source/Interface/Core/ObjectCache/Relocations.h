@@ -8,6 +8,7 @@ enum class RelocationTypes : uint8_t {
   // Aligned to struct RelocNamedSymbolLiteral
   RELOC_NAMED_SYMBOL_LITERAL,
 
+  // TODO: Comment
   RELOC_GUEST_RIP_LITERAL,
 
   // Fixed size named thunk move
@@ -83,6 +84,7 @@ union Relocation {
   RelocNamedSymbolLiteral NamedSymbolLiteral;
   // This makes our union of relocations at least 48 bytes
   // It might be more efficient to not use a union
+  // TODO: Make structs packed to reduce overall size?
   RelocNamedThunkMove NamedThunkMove;
 
   RelocGuestRIPMove GuestRIPMove;

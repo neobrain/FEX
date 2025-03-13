@@ -44,6 +44,7 @@ DEF_OP(CallbackReturn) {
   ret();
 }
 
+// TODO: Apply relocations
 DEF_OP(ExitFunction) {
   auto Op = IROp->C<IR::IROp_ExitFunction>();
 

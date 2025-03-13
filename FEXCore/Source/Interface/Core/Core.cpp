@@ -718,21 +718,21 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
 }
 
 ContextImpl::CompileCodeResult ContextImpl::CompileCode(FEXCore::Core::InternalThreadState* Thread, uint64_t GuestRIP, uint64_t MaxInst) {
-  // JIT Code object cache lookup
-  if (CodeObjectCacheService) {
-    auto CodeCacheEntry = CodeObjectCacheService->FetchCodeObjectFromCache(GuestRIP);
-    if (CodeCacheEntry) {
-      auto CompiledCode = Thread->CPUBackend->RelocateJITObjectCode(GuestRIP, CodeCacheEntry);
-      if (CompiledCode) {
-        return {
-          .CompiledCode = CompiledCode,
-          .DebugData = nullptr, // nullptr here ensures that code serialization doesn't occur on from cache read
-          .StartAddr = 0,       // Unused
-          .Length = 0,          // Unused
-        };
-      }
-    }
-  }
+  // // JIT Code object cache lookup
+  // if (CodeObjectCacheService) {
+  //   auto CodeCacheEntry = CodeObjectCacheService->FetchCodeObjectFromCache(GuestRIP);
+  //   if (CodeCacheEntry) {
+  //     auto CompiledCode = Thread->CPUBackend->RelocateJITObjectCode(GuestRIP, CodeCacheEntry);
+  //     if (CompiledCode) {
+  //       return {
+  //         .CompiledCode = CompiledCode,
+  //         .DebugData = nullptr, // nullptr here ensures that code serialization doesn't occur on from cache read
+  //         .StartAddr = 0,       // Unused
+  //         .Length = 0,          // Unused
+  //       };
+  //     }
+  //   }
+  // }
 
   if (SourcecodeResolver && Config.GDBSymbols()) {
     auto AOTIRCacheEntry = SyscallHandler->LookupAOTIRCacheEntry(Thread, GuestRIP);
