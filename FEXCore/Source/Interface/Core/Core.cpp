@@ -75,6 +75,11 @@ $end_info$
 #include <utility>
 #include <xxhash.h>
 
+extern "C" {
+extern int CodeDumpFD;
+fextl::string ProgramName;
+}
+
 namespace FEXCore::Context {
 ContextImpl::ContextImpl(const FEXCore::HostFeatures& Features)
   : HostFeatures {Features}
@@ -476,6 +481,10 @@ void ContextImpl::UnlockAfterFork(FEXCore::Core::InternalThreadState* LiveThread
 
   Profiler::PostForkAction(Child);
   if (Child) {
+    // Reopen with new PID
+    // TODO: Also add this FD to monitored FD list
+    CodeDumpFD = open(fextl::fmt::format("/tmp/fexcode/{}.{}.bin", ProgramName, ::getpid()).c_str(), O_CREAT | O_WRONLY | O_CLOEXEC, 0644);
+
     CodeInvalidationMutex.StealAndDropActiveLocks();
     if (Config.StrictInProcessSplitLocks) {
       StrictSplitLockMutex = 0;

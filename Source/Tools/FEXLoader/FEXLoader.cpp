@@ -66,7 +66,9 @@ $end_info$
 
 extern "C" {
 extern int CodeDumpFD;
+extern fextl::string ProgramName;
 }
+
 
 namespace {
 static bool SilentLog {};
@@ -573,7 +575,8 @@ int main(int argc, char** argv, char** const envp) {
   }
 
   FHU::Filesystem::CreateDirectories("/tmp/fexcode");
-  CodeDumpFD = open(fextl::fmt::format("/tmp/fexcode/{}.{}.bin", Program.ProgramName, ::getpid()).c_str(), O_CREAT | O_WRONLY, 0644);
+  ProgramName = Program.ProgramName;
+  CodeDumpFD = open(fextl::fmt::format("/tmp/fexcode/{}.{}.bin", Program.ProgramName, ::getpid()).c_str(), O_CREAT | O_WRONLY | O_CLOEXEC, 0644);
 
   auto ParentThread = SyscallHandler->TM.CreateThread(Loader.DefaultRIP(), Loader.GetStackPointer());
   SyscallHandler->TM.TrackThread(ParentThread);
