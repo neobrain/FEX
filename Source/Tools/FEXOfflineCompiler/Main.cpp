@@ -375,18 +375,19 @@ int main(int argc, char** argv) {
   LogMan::Msg::InstallHandler(MsgHandler);
 
   std::vector<const char*> Args {argv + 1, argv + argc};
-  auto CommandName = std::string {basename(argv[0])} + " " + (argc > 1 ? argv[1] : "");
-  Args[0] = CommandName.c_str();
+  const auto CommandName = std::string {basename(argv[0])} + " " + (argc > 1 ? argv[1] : "");
 
   if (argc >= 2 && argv[1] == std::string_view {"combine"}) {
+    Args[0] = CommandName.c_str();
     return CombineCodeMaps(argc - 1, Args.data());
   } else if (argc >= 2 && argv[1] == std::string_view {"generate"}) {
+    Args[0] = CommandName.c_str();
     return GenerateCache(argc - 1, Args.data());
   } else {
     fmt::print("Usage: {} <command>\n\n", basename(argv[0]));
     fmt::print("Commands:\n");
-    fmt::print("  combine\tCombine code maps and prepare them for cache generation\n");
-    fmt::print("  generate\tTrigger cache generation from combined code map\n");
+    fmt::print("  combine\tCombine code maps and prepare them for \"generate\" operation\n");
+    fmt::print("  generate\tGenerate assembly listing from combined code map\n");
     return EXIT_FAILURE;
   }
 }
