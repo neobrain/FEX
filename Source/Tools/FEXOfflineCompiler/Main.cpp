@@ -16,7 +16,6 @@
 
 #include <OptionParser.h>
 
-#include <sys/wait.h>
 #include <xxhash.h>
 
 #include <fmt/printf.h>
@@ -25,13 +24,12 @@
 
 // TODO: Change FinalizeAOTIRCache to take VAFileStart as a parameter instead...
 static uintptr_t VAFileStart = 0;
-static FEXCore::HLE::SyscallOSABI SyscallOSABI = {};
 
 class AOTSyscallHandler : public FEXCore::HLE::SyscallHandler, public FEX::HLE::SyscallMmapInterface {
 public:
   AOTSyscallHandler() {
     // TODO: From command line
-    OSABI = SyscallOSABI;
+    OSABI = FEXCore::HLE::SyscallOSABI::OS_LINUX64;
   }
 
   uint64_t HandleSyscall(FEXCore::Core::CpuStateFrame* Frame, FEXCore::HLE::SyscallArguments* Args) override {
@@ -77,73 +75,10 @@ static void AssertHandler(const char* Message) {
   fmt::print("[ASSERT] {}\n", Message);
 }
 
-std::map<std::string, fextl::set<uintptr_t>> ParseCodeMap(std::ifstream& Codemap) {
-  std::map<std::string, fextl::set<uintptr_t>> Ret;
-  while (true) {
-    std::string Filename;
-    std::getline(Codemap, Filename, '\0');
-    uint64_t Start, Size;
-    Codemap.read(reinterpret_cast<char*>(&Start), sizeof(Start));
-    Codemap.read(reinterpret_cast<char*>(&Size), sizeof(Size));
-    if (!Codemap) {
-      break;
-    }
-    Ret[Filename].insert(Start);
-  }
-  return Ret;
-}
+int main(int argc, char** argv) {
+  LogMan::Throw::InstallHandler(AssertHandler);
+  LogMan::Msg::InstallHandler(MsgHandler);
 
-int CombineCodeMaps(int argc, const char** argv) {
-  optparse::OptionParser Parser {};
-  Parser.add_option("--output").help("Filename for output code map");
-
-  optparse::Values Options = Parser.parse_args(argc, argv);
-  auto Inputs = Parser.args();
-  if (Inputs.empty()) {
-    Parser.print_usage();
-    return EXIT_FAILURE;
-  }
-
-  if (!Options.is_set("output")) {
-    fmt::print("{}: error: Output not specified (--output)", argv[0]);
-    return EXIT_FAILURE;
-  }
-
-  std::map<std::string, fextl::set<uintptr_t>> CodeMaps;
-
-  for (auto& Input : Inputs) {
-    std::ifstream Codemap(Input.c_str(), std::ios_base::binary);
-    if (!Codemap) {
-      fmt::print("Could not open {}\n", Input);
-      return EXIT_FAILURE;
-    }
-
-    auto NewCodeMap = ParseCodeMap(Codemap);
-    for (auto& [Filename, Blocks] : NewCodeMap) {
-      CodeMaps[Filename].merge(Blocks);
-    }
-  }
-
-  std::ofstream Output(Options.get("output"), std::ios_base::binary);
-  if (!Output) {
-    fmt::print("Could not open {} for writing\n", (std::string)Options.get("output"));
-    return EXIT_FAILURE;
-  }
-  for (auto& [File, Blocks] : CodeMaps) {
-    fmt::print("Parsed codemap entries for {}\n", File);
-
-    for (auto& Block : Blocks) {
-      Output.write(File.c_str(), File.size() + 1);
-      Output.write(reinterpret_cast<const char*>(&Block), sizeof(Block));
-      uint64_t Size = 0; // TODO: Not sure if we should track really this
-      Output.write(reinterpret_cast<char*>(&Size), sizeof(Size));
-    }
-  }
-
-  return 0;
-}
-
-int GenerateCache(int argc, const char** argv) {
   optparse::OptionParser Parser {};
   Parser.add_option("--host-dcache-line-size").type("long").help("Target DCache line size to use when compiling code (default: detect from host)");
   Parser.add_option("--host-icache-line-size").type("long").help("Target DCache line size to use when compiling code (default: detect from host)");
@@ -152,7 +87,6 @@ int GenerateCache(int argc, const char** argv) {
   Parser.add_option("--smc").type("long").help("Strategy for self-modifying-code (default: none)");
 
   Parser.add_option("--codemap").help("Path to code map");
-  Parser.add_option("--limit").action("store_true").help("Limit processing to the given binary");
 
   optparse::Values Options = Parser.parse_args(argc, argv);
   if (Parser.args().size() != 1) {
@@ -160,7 +94,7 @@ int GenerateCache(int argc, const char** argv) {
     return 1;
   }
 
-  auto ProgramName = Parser.args()[0];
+  const auto ProgramName = Parser.args()[0];
 
   fextl::set<uintptr_t> InitialBranchTargets;
 
@@ -173,33 +107,24 @@ int GenerateCache(int argc, const char** argv) {
 
     fextl::set<std::string> Files;
 
-    auto Data = ParseCodeMap(Codemap);
-
-    for (auto& [File, Blocks] : Data) {
-      fmt::print("Parsed codemap entries for {}\n", File);
-    }
-
-    for (auto& [File, Blocks] : Data) {
-      if (File == ProgramName.c_str()) {
-        // Continue as normal
-      } else if (!Options.is_set("limit")) {
-        // Process in fork
-        auto child_pid = fork();
-        if (child_pid == 0) {
-          ProgramName = File;
-          break;
-        } else {
-          int status;
-          ::wait(&status);
-          if (status != 0) {
-            fmt::print("CHILD PROCESS FAILED\n");
-            return 1;
-          }
-        }
+    while (true) {
+      std::string Filename;
+      std::getline(Codemap, Filename, '\0');
+      uint64_t Start, Size;
+      Codemap.read(reinterpret_cast<char*>(&Start), sizeof(Start));
+      Codemap.read(reinterpret_cast<char*>(&Size), sizeof(Size));
+      if (!Codemap) {
+        break;
+      }
+      Files.insert(Filename);
+      if (Filename == ProgramName.c_str()) {
+        fmt::print("Block: {}+{:#x}-{:#x}\n", Filename, Start, Start + Size);
+        InitialBranchTargets.insert(Start);
       }
     }
-
-    InitialBranchTargets.merge(Data.at(ProgramName.c_str()));
+    for (auto& File : Files) {
+      fmt::print("Parsed codemap entries for {}\n", File);
+    }
   }
 
   // TODO: Support compiling from an FD
@@ -211,19 +136,8 @@ int GenerateCache(int argc, const char** argv) {
   // TODO: From command line
   FEXCore::Config::Set(FEXCore::Config::CONFIG_MULTIBLOCK, "0");
 
-  // TODO: Consider re-enabling it for code statistics
-  FEXCore::Config::Set(FEXCore::Config::CONFIG_DISABLETELEMETRY, "1");
-
-  ELFCodeLoader Loader {ProgramName, -1, "", {ProgramName}, {}, {}, nullptr, true /* skip interpreter */};
+  ELFCodeLoader Loader {ProgramName, -1, "", {ProgramName}, {}, {}, nullptr};
   FEXCore::Config::Set(FEXCore::Config::CONFIG_IS64BIT_MODE, Loader.Is64BitMode() ? "1" : "0");
-  // TODO: OS_GENERIC?
-  SyscallOSABI = Loader.Is64BitMode() ? FEXCore::HLE::SyscallOSABI::OS_LINUX64 : FEXCore::HLE::SyscallOSABI::OS_LINUX32;
-
-  if (!Loader.Is64BitMode()) {
-    // This has a couple of issues that need to be fixed
-    fmt::print("Cache generation for 32-bit not supported yet\n");
-    return 0;
-  }
 
   // Load HostFeatures
   // NOTE: Config must be fully initialized for detection to work
@@ -251,12 +165,14 @@ int GenerateCache(int argc, const char** argv) {
   HostFeatures = DetectedFeatures;
 
   FEX_CONFIG_OPT(MultiBlock, MULTIBLOCK);
+  if (MultiBlock()) {
+    ERROR_AND_DIE_FMT("SHOULD NOT HAVE MULTIBLOCK ENABLED");
+  }
 
   // TODO: Verify the file exists
   if (!std::filesystem::exists(ProgramName)) {
     fmt::print("File {} does not exist\n", ProgramName);
-    // TODO: Pressure vessel hits this
-    return /*EXIT_FAILURE*/ 0;
+    return EXIT_FAILURE;
   }
 
   if (!Loader.ELFWasLoaded()) {
@@ -320,7 +236,8 @@ int GenerateCache(int argc, const char** argv) {
 
   // TODO: From command line
   // TODO: Use full TSO configuration
-  FEX_CONFIG_OPT(TSOEnabled, TSOENABLED);
+  // FEX_CONFIG_OPT(TSOEnabled, TSOENABLED);
+  const bool TSOEnabled = false;
   if (TSOEnabled) {
     CTX->SetHardwareTSOSupport(true);
   }
@@ -329,8 +246,8 @@ int GenerateCache(int argc, const char** argv) {
     std::vector<std::unique_ptr<ELFCodeLoader>> LoaderMem;
 
     fmt::print(stderr, "Running code discovery...\n");
-    for (auto Addr : InitialBranchTargets) {
-      CTX->CompileRIP(ParentThread->Thread, Addr);
+    for (auto& Section : Loader.Sections) {
+      FEX::AOT::AOTGenSection(*ParentThread->Thread, CTX.get(), Section, InitialBranchTargets /* TODO: Avoid copying... */);
     }
 
     fmt::print(stderr, "Compiling code...\n");
@@ -350,27 +267,5 @@ int GenerateCache(int argc, const char** argv) {
     std::filesystem::rename(FilenameNew.c_str(), Filename.c_str());
     fmt::print("Successfully populated cache {}\n", Filename);
     close(fd);
-  }
-  return 0;
-}
-
-int main(int argc, char** argv) {
-  LogMan::Throw::InstallHandler(AssertHandler);
-  LogMan::Msg::InstallHandler(MsgHandler);
-
-  std::vector<const char*> Args {argv + 1, argv + argc};
-  auto CommandName = std::string {basename(argv[0])} + " " + (argc > 1 ? argv[1] : "");
-  Args[0] = CommandName.c_str();
-
-  if (argc >= 2 && argv[1] == std::string_view {"combine"}) {
-    return CombineCodeMaps(argc - 1, Args.data());
-  } else if (argc >= 2 && argv[1] == std::string_view {"generate"}) {
-    return GenerateCache(argc - 1, Args.data());
-  } else {
-    fmt::print("Usage: {} <command>\n\n", basename(argv[0]));
-    fmt::print("Commands:\n");
-    fmt::print("  combine\tCombine code maps and prepare them for cache generation\n");
-    fmt::print("  generate\tTrigger cache generation from combined code map\n");
-    return EXIT_FAILURE;
   }
 }

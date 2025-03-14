@@ -645,17 +645,12 @@ void Arm64JITCore::EmitDetectionString() {
   Align();
 }
 
-std::atomic<uint64_t> TheOff {0};
-
 void Arm64JITCore::ClearCache() {
   // Get the backing code buffer
 
   auto CodeBuffer = GetEmptyCodeBuffer();
   SetBuffer(CodeBuffer->Ptr, CodeBuffer->Size);
   EmitDetectionString();
-
-  TheOff = manager.LatestOffset;
-  Relocations.clear();
 }
 
 Arm64JITCore::~Arm64JITCore() {}
@@ -768,6 +763,8 @@ void Arm64JITCore::EmitInterruptChecks(bool CheckTF) {
   Bind(&l_NoSuspend);
 #endif
 }
+
+std::atomic<uint64_t> TheOff {0};
 
 CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size, bool SingleInst, const FEXCore::IR::IRListView* IR,
                                                    FEXCore::Core::DebugData* DebugData, const FEXCore::IR::RegisterAllocationData* RAData,
@@ -1160,15 +1157,8 @@ void Arm64JITCore::ResetStack() {
 }
 
 void Arm64JITCore::ImportCode(uint64_t NumBytes) {
-  // TODO: Must update the proper cursor offset here first. We're potentially loading a library from a different thread than the one that last compiled a block...
-  if (GetCursorOffset() != manager.LatestOffset || GetBufferBase() != CurrentCodeBuffer->Ptr) {
-    SetBuffer(CurrentCodeBuffer->Ptr, CurrentCodeBuffer->Size);
-    SetCursorOffset(manager.LatestOffset);
-  }
-
   CursorIncrement(NumBytes);
   manager.LatestOffset = GetCursorOffset();
-  TheOff = manager.LatestOffset;
 }
 
 fextl::unique_ptr<CPUBackend> CreateArm64JITCore(FEXCore::Context::ContextImpl* ctx, FEXCore::Core::InternalThreadState* Thread) {

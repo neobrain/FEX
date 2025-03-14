@@ -22,16 +22,6 @@ $end_info$
 #include <FEXCore/Utils/SignalScopeGuards.h>
 #include <FEXCore/Utils/TypeDefines.h>
 
-struct mymutex : public FEXCore::ForkableUniqueMutex {
-  auto AcquireLock() {
-    return std::unique_lock<FEXCore::ForkableUniqueMutex> {*this};
-  }
-
-  void AssertIsLocked() {}
-};
-namespace FEXCore::CPU {
-extern mymutex codebuffermutex;
-}
 namespace FEX::HLE {
 
 /// Helpers ///
@@ -189,19 +179,7 @@ FEXCore::HLE::AOTIRCacheEntryLookupResult SyscallHandler::LookupAOTIRCacheEntry(
     return {nullptr, 0};
   }
 
-  // The order we store VMAs in seems to be backwards compared to their actual mapping order... Just iterate over all of them to find the true base address
-  auto* VMA = Entry->second.Resource ? Entry->second.Resource->FirstVMA : nullptr;
-  auto* TopVMA = VMA;
-  while (VMA) {
-    if (VMA->Base < TopVMA->Base) {
-      TopVMA = VMA;
-    }
-    VMA = VMA->ResourceNextVMA;
-  }
-
-  // TODO: Should Entry->second.Resource ever be 0 ?
-  return {Entry->second.Resource ? Entry->second.Resource->AOTIRCacheEntry : nullptr,
-          TopVMA ? TopVMA->Base : 0 /*Entry->second.Base - (TopVMA ? TopVMA->Base : 0)*/};
+  return {Entry->second.Resource ? Entry->second.Resource->AOTIRCacheEntry : nullptr, Entry->second.Base - Entry->second.Offset};
 }
 
 void SyscallHandler::ForEachVMAMapping(FEXCore::Core::InternalThreadState* Thread, std::function<void(uint64_t)> Func) {
@@ -212,7 +190,7 @@ void SyscallHandler::ForEachVMAMapping(FEXCore::Core::InternalThreadState* Threa
     if (Entry.Prot.Executable) {
       fmt::print(stderr, "Visiting VMA entry {:#x} / {:#x}: {}\n", Base, Entry.Base - Entry.Offset,
                  *((fextl::string*)((char*)Entry.Resource->AOTIRCacheEntry + 32)) /* FileId */);
-      Func(Entry.Resource->FirstVMA->Base);
+      Func(Entry.Base - Entry.Offset);
     }
   }
 }
@@ -290,8 +268,6 @@ void SyscallHandler::TrackMmap(FEXCore::Core::InternalThreadState* Thread, uintp
     // TODO: Identify via ELF build id instead
     Resource->AOTIRCacheEntry = CTX->LoadAOTIRCacheEntry(std::move(Filename) /*Thread, Base, std::move(Filename), std::move(Elf.BuildID)*/);
     if (Thread) {
-      // TODO: Move this to first compile?
-      auto lock = FEXCore::CPU::codebuffermutex.AcquireLock();
       CTX->FetchAOTIRCacheEntry(Thread, Base);
     } else {
       fmt::print(stderr, "SKIPPING ENTRY PREFETCH SINCE NO THREAD EXISTS YET\n");
