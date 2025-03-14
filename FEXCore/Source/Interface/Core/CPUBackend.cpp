@@ -348,7 +348,7 @@ namespace CPU {
     fextl::shared_ptr<CodeBuffer> OldCodeBuffer;
     auto NewCodeBuffer = manager.GetCurrentCodeBuffer();
     if (CurrentCodeBuffer != NewCodeBuffer) {
-      fmt::print(stderr, "Moving to new CodeBuffer generation in thread {}.{}\n", ::getpid(), ::gettid());
+      fextl::fmt::print(stderr, "Moving to new CodeBuffer generation in thread {}.{}\n", ::getpid(), ::gettid());
 #ifdef ENABLE_FEXCORE_PROFILER
       FEXTracyMessageL("Updating CodeBuffer");
 #endif
@@ -450,7 +450,7 @@ namespace CPU {
       FEXTracyMessageL("Creating first CodeBuffer");
 #endif
       // Made extra large to avoid resizing. TODO: Implement relocation of existing contents
-      AllocateNewCodeBuffer(1024 * 1024 * 128); // TODO: Use InitialCodeSize instead
+      AllocateNewCodeBuffer(1024 * 1024 * 256); // TODO: Use InitialCodeSize instead
     }
     return Latest;
   }

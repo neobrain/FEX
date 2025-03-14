@@ -528,7 +528,9 @@ void ContextImpl::ClearCodeCache(FEXCore::Core::InternalThreadState* Thread, boo
     CodeSerialize::CodeObjectSerializeService::WaitForEmptyJobQueue(&Thread->ObjectCacheRefCounter);
   }
 
-  ERROR_AND_DIE_FMT("TODO: Code cache is not expected to be cleared while testing disk code caching");
+  // It *is* cleared now during cache generation of multiple libraries... because of this use case, we must clear Relocations here now.
+  // This is done in CPUBackend though.
+  // ERROR_AND_DIE_FMT("TODO: Code cache is not expected to be cleared while testing disk code caching");
 
   if (NewCodeBuffer) {
     // NOTE: Holding on to the reference here is required to ensure validity of the WriteLock mutex
@@ -1162,16 +1164,21 @@ void ContextImpl::FetchAOTIRCacheEntry(FEXCore::Core::InternalThreadState* Threa
   } else {
     // auto OldCodeBuffer = Thread->CPUBackend->CurrentCodeBuffer;
     // Thread->CPUBackend->AllocateAndSetCodeBufferForRegion(reinterpret_cast<uintptr_t>(GuestRIPLookup.Entry));
-    fextl::fmt::print(stderr, "LoadAll to {:#x} now {}\n", GuestRIP, GuestRIPLookup.Entry->FileId);
 
     if (!GuestRIPLookup.Entry->FileId.starts_with("ls-")) {
-      return;
+      // return;
+    }
+    if (GuestRIPLookup.Entry->FileId.starts_with("ls-")) {
+      // return;
     }
 
     int fd = open(fextl::fmt::format("/tmp/fexcache/{}", GuestRIPLookup.Entry->FileId).c_str(), O_RDONLY);
     if (fd == -1) {
-      ERROR_AND_DIE_FMT("TODO: Failed loading cache");
+      // ERROR_AND_DIE_FMT("TODO: Failed loading cache");
+      return;
     }
+
+    fextl::fmt::print(stderr, "LoadAll to {:#x} now {}\n", GuestRIP, GuestRIPLookup.Entry->FileId);
 
     {
       // TODO: Acquire write mutex?
@@ -1201,6 +1208,11 @@ void ContextImpl::FetchAOTIRCacheEntry(FEXCore::Core::InternalThreadState* Threa
                           fmt::join(std::begin(ExpectedVersion), std::end(ExpectedVersion), ""));
         ERROR_AND_DIE_FMT("Version mismatch");
       }
+
+      // Align CodeBuffer to next page
+      auto Delta = AlignUp((uintptr_t)CodeBuffer->Ptr, 0x1000) - (uintptr_t)CodeBuffer->Ptr;
+      CodeBuffer->Ptr += Delta;
+      CodeBuffer->UsedSize += Delta;
 
       std::span<std::byte> CodeBufferRange =
         std::as_writable_bytes(std::span {CodeBuffer->Ptr, CodeBuffer->Ptr + CodeBuffer->Size}).subspan(CodeBuffer->UsedSize, header.CodeBufferSize);

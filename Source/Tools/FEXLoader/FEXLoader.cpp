@@ -600,6 +600,8 @@ int main(int argc, char** argv, char** const envp) try {
     auto Entry = SyscallHandler->LookupAOTIRCacheEntry(ParentThread->Thread, Loader.MainElfBase);
     if (FHU::Filesystem::Exists(fextl::fmt::format("/tmp/fexcache/{}", Entry.GetCacheEntryId()))) {
       CTX->FetchAOTIRCacheEntry(ParentThread->Thread, 0);
+    } else if (true) {
+      // Skipping autogeneration for now
     } else {
       // TODO: Query from FEXServer whether to generate a cache or not!
       if (false) {
@@ -623,7 +625,7 @@ int main(int argc, char** argv, char** const envp) try {
   FEX_CONFIG_OPT(SMCChecks, SMCCHECKS);
   if (SMCChecks() != FEXCore::Config::CONFIG_SMC_NONE) {
     // After having preloading the disk cache, ld.so will probably trigger this when applying ELF relocations
-    ERROR_AND_DIE_FMT("TODO: SMC not supported at the moment");
+    // ERROR_AND_DIE_FMT("TODO: SMC not supported at the moment");
   }
   // if (true) {
   //   fextl::unordered_map<fextl::string, FEXCore::IR::AOTIRCacheEntry> AOTCache;
@@ -668,9 +670,9 @@ int main(int argc, char** argv, char** const envp) try {
 
   if (AOTIRGenerate() || TemporaryGenerateAOT) {
     fmt::print(stderr, "Running AOT...\n");
-    for (auto& Section : Loader.Sections) {
-      FEX::AOT::AOTGenSection(*ParentThread->Thread, CTX.get(), Section);
-    }
+    // for (auto& Section : Loader.Sections) {
+    //   FEX::AOT::AOTGenSection(*ParentThread->Thread, CTX.get(), Section);
+    // }
 
     FHU::Filesystem::CreateDirectories("/tmp/fexcache");
     // TODO: Consider O_EXCL so that this fails to overwrite existing files?

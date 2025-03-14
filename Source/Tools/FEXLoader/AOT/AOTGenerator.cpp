@@ -25,10 +25,6 @@ void AOTGenSection(FEXCore::Core::InternalThreadState& ParentThread, FEXCore::Co
   auto off = Section.Filename.find_last_of('/');
   auto full_ext = (off == std::string::npos) ? Section.Filename.end() : (Section.Filename.begin() + off);
   full_ext = std::find(full_ext, Section.Filename.end(), '.');
-  if (std::string_view {full_ext, Section.Filename.end()}.starts_with(".so")) {
-    fmt::print(stderr, "Skipping\n");
-    return;
-  }
 
   // Make sure this section is executable and big enough
   if (!Section.Executable || Section.Size < 16) {
