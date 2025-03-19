@@ -387,7 +387,7 @@ private:
     MappedResource* Resource;
 
     // these are for intrusive linked list tracking, starting from Resource->FirstVMA and ordered by address
-    VMAEntry* ResourcePrevVMA; // TODO: Not really needed...
+    VMAEntry* ResourcePrevVMA;
     VMAEntry* ResourceNextVMA;
 
     uint64_t Base;

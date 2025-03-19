@@ -533,7 +533,7 @@ void ELFContainer::CalculateSymbols() {
 
     uint64_t NumSymbols = NumSymTabSymbols + NumDynSymSymbols;
 
-    Symbols.resize(NumSymbols, {});
+    Symbols.resize(NumSymbols);
     for (uint64_t i = 0; i < NumSymTabSymbols; ++i) {
       uint64_t offset = SymTabHeader->sh_offset + i * SymTabHeader->sh_entsize;
       const Elf64_Sym* Symbol = reinterpret_cast<const Elf64_Sym*>(&RawFile.at(offset));
@@ -548,7 +548,6 @@ void ELFContainer::CalculateSymbols() {
           DefinedSymbol->Bind = ELF64_ST_BIND(Symbol->st_info);
           DefinedSymbol->Name = Name;
           DefinedSymbol->SectionIndex = Symbol->st_shndx;
-          // fmt::print("FOUND SYMBOL: {} -> {:#x}\n", Name, offset);
 
           SymbolMap[DefinedSymbol->Name] = DefinedSymbol;
           SymbolMapByAddress[DefinedSymbol->Address] = DefinedSymbol;
@@ -570,7 +569,6 @@ void ELFContainer::CalculateSymbols() {
           DefinedSymbol->Bind = ELF64_ST_BIND(Symbol->st_info);
           DefinedSymbol->Name = Name;
           DefinedSymbol->SectionIndex = Symbol->st_shndx;
-          // fmt::print("FOUND DYN SYMBOL: {} -> {:#x}\n", Name, offset);
 
           SymbolMap[DefinedSymbol->Name] = DefinedSymbol;
           SymbolMapByAddress[DefinedSymbol->Address] = DefinedSymbol;

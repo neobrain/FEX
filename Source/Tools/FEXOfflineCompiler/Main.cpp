@@ -46,7 +46,6 @@ public:
 
   // These are no-ops implementations of the SyscallHandler API
   FEXCore::HLE::AOTIRCacheEntryLookupResult LookupAOTIRCacheEntry(FEXCore::Core::InternalThreadState* Thread, uint64_t GuestAddr) override {
-    // ERROR_AND_DIE_FMT("MUST RETURN THE ACTUAL SEGMENT OFFSET NOW...\n");
     return {(FEXCore::IR::AOTIRCacheEntry*)1, VAFileStart};
   }
 
@@ -229,9 +228,6 @@ int GenerateCache(int argc, const char** argv) {
   // Load HostFeatures
   // NOTE: Config must be fully initialized for detection to work
   FEXCore::HostFeatures HostFeatures {};
-  // TODO: Setup   FEX_CONFIG_OPT(ForceSVEWidth, FORCESVEWIDTH);
-
-
   const auto DetectedFeatures = FEX::FetchHostFeatures();
   if (Options.is_set("host-features")) {
     uint32_t RawValue = Options.get("host-features");
@@ -333,16 +329,7 @@ int GenerateCache(int argc, const char** argv) {
     std::vector<std::unique_ptr<ELFCodeLoader>> LoaderMem;
 
     fmt::print(stderr, "Running code discovery...\n");
-    // for (auto& Section : Loader.Sections) {
-    //   FEX::AOT::AOTGenSection(*ParentThread->Thread, CTX.get(), Section, InitialBranchTargets /* TODO: Avoid copying... */);
-    // }
-    int Idx = 0;
     for (auto Addr : InitialBranchTargets) {
-      Idx++;
-      if (Idx < 335 || Idx > 335) {
-        // continue;
-      }
-      // fmt::print("RIP {:#x}\n", Addr);
       CTX->CompileRIP(ParentThread->Thread, Addr);
     }
 

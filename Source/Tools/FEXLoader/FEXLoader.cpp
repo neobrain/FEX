@@ -547,7 +547,7 @@ int main(int argc, char** argv, char** const envp) try {
   }
 
   {
-    Loader.SetVDSOBase(VDSOMapping.VDSOBase); // TODO: Check interaction with disk caching?
+    Loader.SetVDSOBase(VDSOMapping.VDSOBase);
     Loader.CalculateHWCaps(CTX.get());
 
     if (!Loader.MapMemory(SyscallHandler.get())) {
@@ -669,54 +669,29 @@ int main(int argc, char** argv, char** const envp) try {
   }
 
   if (AOTIRGenerate() || TemporaryGenerateAOT) {
-    std::vector<ELFCodeLoader*> Loaders {&Loader};
-    std::vector<std::unique_ptr<ELFCodeLoader>> LoaderMem;
+    fmt::print(stderr, "Running AOT...\n");
+    // for (auto& Section : Loader.Sections) {
+    //   FEX::AOT::AOTGenSection(*ParentThread->Thread, CTX.get(), Section);
+    // }
 
-    for (auto& SOPath : {"/home/tony/.fex-emu/RootFS/Ubuntu_24_04/usr/lib/x86_64-linux-gnu/libc.so.6",
-                         "/home/tony/.fex-emu/RootFS/Ubuntu_24_04/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2",
-                         "/home/tony/.fex-emu/RootFS/Ubuntu_24_04/usr/lib/x86_64-linux-gnu/libselinux.so.1",
-                         "/home/tony/.fex-emu/RootFS/Ubuntu_24_04/usr/lib/x86_64-linux-gnu/libpcre2-8.so.0.11.2"}) {
-      auto SOLoader = std::make_unique<ELFCodeLoader>(SOPath, -1, LDPath(), Args, ParsedArgs, envp, &Environment);
-      SOLoader->SetVDSOBase(VDSOMapping.VDSOBase); // TODO: Check interaction with disk caching?
-      SOLoader->CalculateHWCaps(CTX.get());
-      if (!SOLoader->MapMemory(SyscallHandler.get())) {
-        // fextl::fmt::print(stderr, "FAILED TO MAP LIBC.so\n");
-      }
-      Loaders.push_back(SOLoader.get());
-      LoaderMem.push_back(std::move(SOLoader));
-    }
-    // fextl::fmt::print(stderr, "MAPPED LIBC.so\n");
-
-    // TODO: Probably not needed
-    CTX->ClearCodeCache(ParentThread->Thread);
-
-    for (auto& Loader : Loaders) {
-      fmt::print(stderr, "Running AOT...\n");
-      for (auto& Section : Loader->Sections) {
-        FEX::AOT::AOTGenSection(*ParentThread->Thread, CTX.get(), Section, {});
-      }
-
-      FHU::Filesystem::CreateDirectories("/tmp/fexcache");
-      // TODO: Consider O_EXCL so that this fails to overwrite existing files?
-      auto Entry = SyscallHandler->LookupAOTIRCacheEntry(ParentThread->Thread, Loader->MainElfBase);
-      int fd = open(fextl::fmt::format("/tmp/fexcache/{}", Entry.GetCacheEntryId()).c_str(), O_CREAT | O_WRONLY, 0644);
-      CTX->FinalizeAOTIRCache(*ParentThread->Thread, fd, Loader->MainElfBase);
-      LogMan::Msg::IFmt("AOTIR Cache Stored");
-      close(fd);
-
-      CTX->ClearCodeCache(ParentThread->Thread);
-    }
+    FHU::Filesystem::CreateDirectories("/tmp/fexcache");
+    // TODO: Consider O_EXCL so that this fails to overwrite existing files?
+    auto Entry = SyscallHandler->LookupAOTIRCacheEntry(ParentThread->Thread, Loader.MainElfBase);
+    int fd = open(fextl::fmt::format("/tmp/fexcache/{}", Entry.GetCacheEntryId()).c_str(), O_CREAT | O_WRONLY, 0644);
+    CTX->FinalizeAOTIRCache(*ParentThread->Thread, fd, Loader.MainElfBase);
+    LogMan::Msg::IFmt("AOTIR Cache Stored");
+    close(fd);
 
     std::exit(0);
     fextl::fmt::print(stderr, "... done running AOT. Waiting for CTRL+C\n");
-    // while (true) {};
+    while (true) {};
     // ERROR_AND_DIE_FMT("All good, terminating for debugging now");
   } else {
     CTX->ExecuteThread(ParentThread->Thread);
   }
 
-  // LogMan::Msg::EFmt("Closing code dump FD");
-  // close(CodeDumpFD);
+  LogMan::Msg::EFmt("Closing code dump FD");
+  close(CodeDumpFD);
 
   DebugServer.reset();
   SyscallHandler->TM.Stop();
