@@ -12,116 +12,44 @@ $end_info$
 namespace FEX::HLE {
 /// List Operations ///
 
-inline void SyscallHandler::VMATracking::ListCheckVMALinks(VMAEntry* VMA) {
-  if (VMA) {
-    LOGMAN_THROW_A_FMT(VMA->ResourceNextVMA != VMA, "VMA tracking error");
-    LOGMAN_THROW_A_FMT(VMA->ResourcePrevVMA != VMA, "VMA tracking error");
-  }
-}
-
 // Removes a VMA from corresponding MappedResource list
 // Returns true if list is empty
 bool SyscallHandler::VMATracking::ListRemove(VMAEntry* VMA) {
   LOGMAN_THROW_A_FMT(VMA->Resource != nullptr, "VMA tracking error");
 
-  // if it has prev, make prev to next
-  if (VMA->ResourcePrevVMA) {
-    LOGMAN_THROW_A_FMT(VMA->ResourcePrevVMA->ResourceNextVMA == VMA, "VMA tracking error");
-    VMA->ResourcePrevVMA->ResourceNextVMA = VMA->ResourceNextVMA;
-  } else {
-    LOGMAN_THROW_A_FMT(VMA->Resource->FirstVMA == VMA, "VMA tracking error");
-  }
+  auto it = std::find(VMA->Resource->VMAs.begin(), VMA->Resource->VMAs.end(), VMA);
+  LOGMAN_THROW_A_FMT(it != VMA->Resource->VMAs.end(), "VMA tracking error");
+  VMA->Resource->VMAs.erase(it);
 
-  // if it has next, make next to prev
-  if (VMA->ResourceNextVMA) {
-    LOGMAN_THROW_A_FMT(VMA->ResourceNextVMA->ResourcePrevVMA == VMA, "VMA tracking error");
-    VMA->ResourceNextVMA->ResourcePrevVMA = VMA->ResourcePrevVMA;
-  }
-
-  // If it is the first in the list, make Next the first in the list
-  if (VMA->Resource && VMA->Resource->FirstVMA == VMA) {
-    LOGMAN_THROW_A_FMT(!VMA->ResourceNextVMA || VMA->ResourceNextVMA->ResourcePrevVMA == nullptr, "VMA tracking error");
-
-    VMA->Resource->FirstVMA = VMA->ResourceNextVMA;
-  }
-
-  ListCheckVMALinks(VMA);
-  ListCheckVMALinks(VMA->ResourceNextVMA);
-  ListCheckVMALinks(VMA->ResourcePrevVMA);
-
-  // Return true if list is empty
-  return VMA->Resource->FirstVMA == nullptr;
+  return VMA->Resource->VMAs.empty();
 }
 
 // Replaces a VMA in corresponding MappedResource list
-// Requires NewVMA->Resource, NewVMA->ResourcePrevVMA and NewVMA->ResourceNextVMA to be already setup
 void SyscallHandler::VMATracking::ListReplace(VMAEntry* VMA, VMAEntry* NewVMA) {
   LOGMAN_THROW_A_FMT(VMA->Resource != nullptr, "VMA tracking error");
-
   LOGMAN_THROW_A_FMT(VMA->Resource == NewVMA->Resource, "VMA tracking error");
-  LOGMAN_THROW_A_FMT(NewVMA->ResourcePrevVMA == VMA->ResourcePrevVMA, "VMA tracking error");
-  LOGMAN_THROW_A_FMT(NewVMA->ResourceNextVMA == VMA->ResourceNextVMA, "VMA tracking error");
 
-  if (VMA->ResourcePrevVMA) {
-    LOGMAN_THROW_A_FMT(VMA->Resource->FirstVMA != VMA, "VMA tracking error");
-    LOGMAN_THROW_A_FMT(VMA->ResourcePrevVMA->ResourceNextVMA == VMA, "VMA tracking error");
-    VMA->ResourcePrevVMA->ResourceNextVMA = NewVMA;
-  } else {
-    LOGMAN_THROW_A_FMT(VMA->Resource->FirstVMA == VMA, "VMA tracking error");
-    VMA->Resource->FirstVMA = NewVMA;
-  }
-
-  if (VMA->ResourceNextVMA) {
-    LOGMAN_THROW_A_FMT(VMA->ResourceNextVMA->ResourcePrevVMA == VMA, "VMA tracking error");
-    VMA->ResourceNextVMA->ResourcePrevVMA = NewVMA;
-  }
-
-  ListCheckVMALinks(VMA);
-  ListCheckVMALinks(NewVMA);
-  ListCheckVMALinks(VMA->ResourceNextVMA);
-  ListCheckVMALinks(VMA->ResourcePrevVMA);
+  auto it = std::find(VMA->Resource->VMAs.begin(), VMA->Resource->VMAs.end(), VMA);
+  LOGMAN_THROW_A_FMT(it != VMA->Resource->VMAs.end(), "VMA tracking error");
+  *it = NewVMA;
 }
 
 // Inserts a VMA in corresponding MappedResource list
-// Requires NewVMA->Resource, NewVMA->ResourcePrevVMA and NewVMA->ResourceNextVMA to be already setup
 void SyscallHandler::VMATracking::ListInsertAfter(VMAEntry* AfterVMA, VMAEntry* NewVMA) {
   LOGMAN_THROW_A_FMT(NewVMA->Resource != nullptr, "VMA tracking error");
-
   LOGMAN_THROW_A_FMT(AfterVMA->Resource == NewVMA->Resource, "VMA tracking error");
-  LOGMAN_THROW_A_FMT(NewVMA->ResourcePrevVMA == AfterVMA, "VMA tracking error");
-  LOGMAN_THROW_A_FMT(NewVMA->ResourceNextVMA == AfterVMA->ResourceNextVMA, "VMA tracking error");
 
-  if (AfterVMA->ResourceNextVMA) {
-    LOGMAN_THROW_A_FMT(AfterVMA->ResourceNextVMA->ResourcePrevVMA == AfterVMA, "VMA tracking error");
-    AfterVMA->ResourceNextVMA->ResourcePrevVMA = NewVMA;
-  }
-  AfterVMA->ResourceNextVMA = NewVMA;
-
-  ListCheckVMALinks(AfterVMA);
-  ListCheckVMALinks(NewVMA);
-  ListCheckVMALinks(AfterVMA->ResourceNextVMA);
-  ListCheckVMALinks(AfterVMA->ResourcePrevVMA);
+  auto it = std::find(AfterVMA->Resource->VMAs.begin(), AfterVMA->Resource->VMAs.end(), AfterVMA);
+  LOGMAN_THROW_A_FMT(it != AfterVMA->Resource->VMAs.end(), "VMA tracking error");
+  AfterVMA->Resource->VMAs.insert(std::next(it), NewVMA);
+  // TODO: /dev/dri/renderD128 actually gets mapped >600 times in some process during Steam startup... maybe we can change this to only
+  // contain executable VMAs, while having non-executable VMAs still point to the resource?
 }
 
 // Prepends a VMA
-// Requires NewVMA->Resource, NewVMA->ResourcePrevVMA and NewVMA->ResourceNextVMA to be already setup
-void SyscallHandler::VMATracking::ListPrepend(MappedResource* Resource, VMAEntry* NewVMA) {
-  LOGMAN_THROW_A_FMT(Resource != nullptr, "VMA tracking error");
-
-  LOGMAN_THROW_A_FMT(NewVMA->Resource == Resource, "VMA tracking error");
-  LOGMAN_THROW_A_FMT(NewVMA->ResourcePrevVMA == nullptr, "VMA tracking error");
-  LOGMAN_THROW_A_FMT(NewVMA->ResourceNextVMA == Resource->FirstVMA, "VMA tracking error");
-
-  if (Resource->FirstVMA) {
-    LOGMAN_THROW_A_FMT(Resource->FirstVMA->ResourcePrevVMA == nullptr, "VMA tracking error");
-    Resource->FirstVMA->ResourcePrevVMA = NewVMA;
-  }
-
-  Resource->FirstVMA = NewVMA;
-
-  ListCheckVMALinks(NewVMA);
-  ListCheckVMALinks(NewVMA->ResourceNextVMA);
-  ListCheckVMALinks(NewVMA->ResourcePrevVMA);
+void SyscallHandler::VMATracking::ListPrepend(MappedResource& Resource, VMAEntry* NewVMA) {
+  LOGMAN_THROW_A_FMT(NewVMA->Resource == &Resource, "VMA tracking error");
+  Resource.VMAs.insert(Resource.VMAs.begin(), NewVMA);
 }
 
 /// VMA tracking ///
@@ -146,25 +74,18 @@ void SyscallHandler::VMATracking::SetUnsafe(FEXCore::Context::Context* CTX, Mapp
                                             uintptr_t Offset, uintptr_t Length, VMAFlags Flags, VMAProt Prot) {
   ClearUnsafe(CTX, Base, Length, MappedResource);
 
-  auto PrevResVMA = MappedResource ? MappedResource->FirstVMA : nullptr;
-  auto NextResVMA = PrevResVMA ? PrevResVMA->ResourceNextVMA : nullptr;
-  if (PrevResVMA && PrevResVMA->Base > Base) {
-    NextResVMA = std::exchange(PrevResVMA, nullptr);
-  }
-  while (NextResVMA && NextResVMA->Base < Base) {
-    PrevResVMA = NextResVMA;
-    NextResVMA = PrevResVMA->ResourceNextVMA;
-  }
-
-  auto [Iter, Inserted] = VMAs.emplace(Base, VMAEntry {MappedResource, PrevResVMA, NextResVMA, Base, Offset, Length, Flags, Prot});
+  auto [Iter, Inserted] = VMAs.emplace(Base, VMAEntry {MappedResource, Base, Offset, Length, Flags, Prot});
 
   LOGMAN_THROW_A_FMT(Inserted == true, "VMA Tracking corruption");
 
-  if (MappedResource && !PrevResVMA) {
-    // Insert to the front of the linked list
-    ListPrepend(MappedResource, &Iter->second);
-  } else if (MappedResource) {
-    ListInsertAfter(PrevResVMA, &Iter->second);
+  if (MappedResource) {
+    auto it = std::find_if(MappedResource->VMAs.begin(), MappedResource->VMAs.end(), [Base](auto& VMA) { return VMA->Base > Base; });
+    if (it == MappedResource->VMAs.begin()) {
+      // Insert to the front of the linked list
+      ListPrepend(*MappedResource, &Iter->second);
+    } else {
+      ListInsertAfter(*std::prev(it), &Iter->second);
+    }
   }
 }
 
@@ -230,8 +151,7 @@ void SyscallHandler::VMATracking::ClearUnsafe(FEXCore::Context::Context* CTX, ui
         auto NewOffset = OffsetDiff + Top;
         auto NewLength = MapTop - Top;
 
-        auto [Iter, Inserted] = VMAs.emplace(Top, VMAEntry {Current->Resource, ReplaceAndErase ? Current->ResourcePrevVMA : Current,
-                                                            Current->ResourceNextVMA, Top, NewOffset, NewLength, Current->Flags, Current->Prot});
+        auto [Iter, Inserted] = VMAs.emplace(Top, VMAEntry {Current->Resource, Top, NewOffset, NewLength, Current->Flags, Current->Prot});
         LOGMAN_THROW_A_FMT(Inserted == true, "VMA tracking error");
         auto TrailingPart = &Iter->second;
         if (Current->Resource) {
@@ -320,14 +240,9 @@ void SyscallHandler::VMATracking::ChangeUnsafe(uintptr_t Base, uintptr_t Length,
       auto NewOffset = OffsetDiff + CurrentBase;
       auto NewLength = CurrentTop - Top;
 
-      auto [Iter, Inserted] = VMAs.emplace(Top, VMAEntry {.Resource = Current->Resource,
-                                                          .ResourcePrevVMA = Current,
-                                                          .ResourceNextVMA = Current->ResourceNextVMA,
-                                                          .Base = Top,
-                                                          .Offset = NewOffset,
-                                                          .Length = NewLength,
-                                                          .Flags = CurrentFlags,
-                                                          .Prot = CurrentProt});
+      // TODO: Actually, in effect this is just another interval list...
+      auto [Iter, Inserted] = VMAs.emplace(
+        Top, VMAEntry {.Resource = Current->Resource, .Base = Top, .Offset = NewOffset, .Length = NewLength, .Flags = CurrentFlags, .Prot = CurrentProt});
 
       if (!Inserted) {
         // We can't recover from this.
@@ -393,14 +308,8 @@ void SyscallHandler::VMATracking::ChangeUnsafe(uintptr_t Base, uintptr_t Length,
     auto NewOffset = OffsetDiff + Top;
     auto NewLength = CurrentTop - Top;
 
-    auto [Iter, Inserted] = VMAs.emplace(Top, VMAEntry {.Resource = Current->Resource,
-                                                        .ResourcePrevVMA = Current,
-                                                        .ResourceNextVMA = Current->ResourceNextVMA,
-                                                        .Base = Top,
-                                                        .Offset = NewOffset,
-                                                        .Length = NewLength,
-                                                        .Flags = CurrentFlags,
-                                                        .Prot = CurrentProt});
+    auto [Iter, Inserted] = VMAs.emplace(
+      Top, VMAEntry {.Resource = Current->Resource, .Base = Top, .Offset = NewOffset, .Length = NewLength, .Flags = CurrentFlags, .Prot = CurrentProt});
 
     if (!Inserted) [[unlikely]] {
       // We can't recover from this.
@@ -432,14 +341,8 @@ void SyscallHandler::VMATracking::ChangeUnsafe(uintptr_t Base, uintptr_t Length,
       auto NewOffset = OffsetDiff + Base;
       auto NewLength = Top - Base;
 
-      auto [Iter, Inserted] = VMAs.emplace(Base, VMAEntry {.Resource = Current->Resource,
-                                                           .ResourcePrevVMA = Current,
-                                                           .ResourceNextVMA = Current->ResourceNextVMA,
-                                                           .Base = Base,
-                                                           .Offset = NewOffset,
-                                                           .Length = NewLength,
-                                                           .Flags = CurrentFlags,
-                                                           .Prot = NewProt});
+      auto [Iter, Inserted] = VMAs.emplace(
+        Base, VMAEntry {.Resource = Current->Resource, .Base = Base, .Offset = NewOffset, .Length = NewLength, .Flags = CurrentFlags, .Prot = NewProt});
 
       if (!Inserted) [[unlikely]] {
         // We can't recover from this.
@@ -460,14 +363,8 @@ void SyscallHandler::VMATracking::ChangeUnsafe(uintptr_t Base, uintptr_t Length,
       auto NewOffset = OffsetDiff + Top;
       auto NewLength = CurrentTop - Top;
 
-      auto [Iter, Inserted] = VMAs.emplace(Top, VMAEntry {.Resource = Current->Resource,
-                                                          .ResourcePrevVMA = Current,
-                                                          .ResourceNextVMA = Current->ResourceNextVMA,
-                                                          .Base = Top,
-                                                          .Offset = NewOffset,
-                                                          .Length = NewLength,
-                                                          .Flags = CurrentFlags,
-                                                          .Prot = CurrentProt});
+      auto [Iter, Inserted] = VMAs.emplace(
+        Top, VMAEntry {.Resource = Current->Resource, .Base = Top, .Offset = NewOffset, .Length = NewLength, .Flags = CurrentFlags, .Prot = CurrentProt});
 
       if (!Inserted) {
         // We can't recover from this.
