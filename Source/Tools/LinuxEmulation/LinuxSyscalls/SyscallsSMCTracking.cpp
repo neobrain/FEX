@@ -189,19 +189,9 @@ FEXCore::HLE::AOTIRCacheEntryLookupResult SyscallHandler::LookupAOTIRCacheEntry(
     return {nullptr, 0};
   }
 
-  // The order we store VMAs in seems to be backwards compared to their actual mapping order... Just iterate over all of them to find the true base address
-  auto* VMA = Entry->second.Resource ? Entry->second.Resource->FirstVMA : nullptr;
-  auto* TopVMA = VMA;
-  while (VMA) {
-    if (VMA->Base < TopVMA->Base) {
-      TopVMA = VMA;
-    }
-    VMA = VMA->ResourceNextVMA;
-  }
-
   // TODO: Should Entry->second.Resource ever be 0 ?
   return {Entry->second.Resource ? Entry->second.Resource->AOTIRCacheEntry : nullptr,
-          TopVMA ? TopVMA->Base : 0 /*Entry->second.Base - (TopVMA ? TopVMA->Base : 0)*/};
+          Entry->second.Resource ? Entry->second.Resource->FirstVMA->Base : 0 /*Entry->second.Base - (TopVMA ? TopVMA->Base : 0)*/};
 }
 
 void SyscallHandler::ForEachVMAMapping(FEXCore::Core::InternalThreadState* Thread, std::function<void(uint64_t)> Func) {
