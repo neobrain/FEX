@@ -774,6 +774,12 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
                                                    bool CheckTF) {
   FEXCORE_PROFILE_SCOPED("Arm64::CompileCode");
 
+  if (false && Entry == 0x1fb36e7) {
+    fextl::stringstream ss;
+    IR::Dump(&ss, IR, RAData);
+    fmt::print(stderr, "IR for guest block at {:#x}:\n{}\n", Entry, ss.str());
+  }
+
   // ERROR_AND_DIE_FMT("TODO: Compiling new code will overwrite CodeBuffer. Make sure to adjust the write cursor!");
 
   // TODO: Moved to CompileBlock for now
@@ -808,10 +814,11 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
   });
 
   // fmt::print(stderr, "CompileCode: buffer {} thread {}.{}\n", fmt::ptr(CurrentCodeBuffer.get()), ::getpid(), ::gettid());
+  // fmt::print(stderr, "CompileCode: guest rip {:#x} thread {}.{}\n", Entry, ::getpid(), ::gettid());
 
   auto XYZ = CurrentCodeBuffer; // TODO: Needed to keep the SharedLookupCache's allocator alive...
   if (CurrentCodeBuffer->LookupCache.get() != ThreadState->LookupCache->Shared) {
-    fmt::print(stderr, "INVARIANT VIOLATED: SharedLookupCache doesn't match up!\n");
+    fextl::fmt::print(stderr, "INVARIANT VIOLATED: SharedLookupCache doesn't match up!\n");
     ERROR_AND_DIE_FMT("no way");
   }
   if (CheckCodeBufferUpdate()) {
@@ -1064,11 +1071,14 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
   }
 
   this->IR = nullptr;
+  // fextl::fmt::print(stderr, "Cursor address now {} ({}-{})\n", fmt::ptr(GetCursorAddress<uint8_t*>()), fmt::ptr(CodeData.BlockBegin),
+  //                   fmt::ptr(CodeData.BlockBegin + CodeData.Size));
 
   if (CodeDumpFD != -1) {
     auto Region = CTX->SyscallHandler->LookupAOTIRCacheEntry(ThreadState, Entry);
     if (Region.Entry) {
       write(CodeDumpFD, Region.Entry->Filename.c_str(), Region.Entry->Filename.size() + 1);
+      // TODO: This is the FILE OFFSET, but we actually want the offset in virtual address space...
       auto Offset = Entry - Region.VAFileStart;
       write(CodeDumpFD, &Offset, sizeof(Offset));
       write(CodeDumpFD, &Size, sizeof(Size));
@@ -1080,7 +1090,8 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
 
 void* Arm64JITCore::RelocateJITObjectCode(uint64_t Entry, std::span<std::byte> HostCode, std::span<const Relocation> Relocations, bool ForStorage) {
   if (GetCursorOffset() + HostCode.size_bytes() + sizeof(JITCodeHeader) + sizeof(JITCodeTail) > CurrentCodeBuffer->Size) {
-    ERROR_AND_DIE_FMT("Out of CodeBuffer space");
+    ERROR_AND_DIE_FMT("Out of CodeBuffer space (needed {:#x} KiB, have {:#x} left)", HostCode.size_bytes() / 1024,
+                      (CurrentCodeBuffer->Size - GetCursorOffset()) / 1024);
     // CTX->ClearCodeCache(ThreadState);
   }
 
@@ -1091,6 +1102,7 @@ void* Arm64JITCore::RelocateJITObjectCode(uint64_t Entry, std::span<std::byte> H
 
   memcpy(RelocatedCode, HostCode.data(), HostCode.size_bytes());
 
+  // TODO: Use a custom Arm64Emitter to allow inplace patching instead
   auto success = ApplyRelocations(ForStorage ? 0 : Entry, RelocatedCodeBeginOffset, Relocations, ForStorage);
   if (!success) {
     ERROR_AND_DIE_FMT("RELOCATION FAILED");
@@ -1166,7 +1178,9 @@ void Arm64JITCore::ImportCode(uint64_t NumBytes) {
     SetCursorOffset(manager.LatestOffset);
   }
 
+  // fextl::fmt::print(stderr, "ImportCode {:#x} bytes\n", NumBytes);
   CursorIncrement(NumBytes);
+  fextl::fmt::print(stderr, "Bumping CodeBuffer from {:#x} to {:#x}\n", manager.LatestOffset, GetCursorOffset());
   manager.LatestOffset = GetCursorOffset();
   TheOff = manager.LatestOffset;
 }

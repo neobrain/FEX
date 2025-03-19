@@ -25,6 +25,10 @@ void AOTGenSection(FEXCore::Core::InternalThreadState& ParentThread, FEXCore::Co
   auto off = Section.Filename.find_last_of('/');
   auto full_ext = (off == std::string::npos) ? Section.Filename.end() : (Section.Filename.begin() + off);
   full_ext = std::find(full_ext, Section.Filename.end(), '.');
+  // if (std::string_view {full_ext, Section.Filename.end()}.starts_with(".so")) {
+  //   fmt::print(stderr, "Skipping\n");
+  //   return;
+  // }
 
   // Make sure this section is executable and big enough
   if (!Section.Executable || Section.Size < 16) {
@@ -35,7 +39,8 @@ void AOTGenSection(FEXCore::Core::InternalThreadState& ParentThread, FEXCore::Co
   ELFLoader::ELFContainer container {Section.Filename, "", true};
 
   // Add symbols to the branch targets list
-  if (true) {
+  // TODO: Hits debug assertions about VEX.R in /home/tony/.fex-emu/RootFS/Ubuntu_24_04/usr/lib/i386-linux-gnu/libGLX_mesa.so.0.0.0
+  if (true && false) {
     container.AddSymbols([&](ELFLoader::ELFSymbol* sym) {
       auto Destination = sym->Address + Section.ElfBase;
 
@@ -137,18 +142,21 @@ void AOTGenSection(FEXCore::Core::InternalThreadState& ParentThread, FEXCore::Co
 
         // Compile entrypoint
         counter++;
+        // fmt::print("Compiling code at {:#x} / {:#x}\n", BranchTarget, BranchTarget - Section.ElfBase);
         CTX->CompileRIP(Thread, BranchTarget);
-
+        // break;
         // Add external branches to the "to process" list
-        for (auto Destination : ExternalBranchesLocal) {
-          if (!(Destination >= Section.Base && Destination <= (Section.Base + Section.Size))) {
-            continue;
+        if (false) {
+          for (auto Destination : ExternalBranchesLocal) {
+            if (!(Destination >= Section.Base && Destination <= (Section.Base + Section.Size))) {
+              continue;
+            }
+            if (Compiled.contains(Destination)) {
+              continue;
+            }
+            Compiled.insert(Destination);
+            BranchTargets.push(Destination);
           }
-          if (Compiled.contains(Destination)) {
-            continue;
-          }
-          Compiled.insert(Destination);
-          BranchTargets.push(Destination);
         }
         ExternalBranchesLocal.clear();
       }

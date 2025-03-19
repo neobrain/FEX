@@ -588,8 +588,7 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
     bool HadDispatchError {false};
     bool HadInvalidInst {false};
 
-    Thread->FrontendDecoder->DecodeInstructionsAtEntry(GuestCode, GuestRIP, MaxInst,
-                                                       [Thread](uint64_t BlockEntry, uint64_t Start, uint64_t Length) {
+    Thread->FrontendDecoder->DecodeInstructionsAtEntry(GuestCode, GuestRIP, MaxInst, [Thread](uint64_t BlockEntry, uint64_t Start, uint64_t Length) {
       if (Thread->LookupCache->AddBlockExecutableRange(BlockEntry, Start, Length)) {
         static_cast<ContextImpl*>(Thread->CTX)->SyscallHandler->MarkGuestExecutableRange(Thread, Start, Length);
       }
@@ -949,6 +948,12 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
   }
 
   auto [CodePtr, DebugData, StartAddr, Length] = CompileCode(Thread, GuestRIP, MaxInst);
+  if ((GuestRIP >> 32) == 0) {
+    // fmt::print("Compiled: {:#x} -> {}\n", GuestRIP, fmt::ptr(CodePtr));
+  }
+  if (GuestRIP == 0x1fb36e7) {
+    // fmt::print("Compiled: {:#x} -> {} {}\n", 0x1fb36e7, fmt::ptr(CodePtr), ::getpid());
+  }
   if (CodePtr == nullptr) {
     return 0;
   }
@@ -1125,7 +1130,7 @@ void ContextImpl::AddThunkTrampolineIRHandler(uintptr_t Entrypoint, uintptr_t Gu
                           offsetof(Core::CPUState, mm[0][0]));
     }
     emit->_ExitFunction(emit->_Constant(GuestThunkEntrypoint));
-    },
+  },
     ThunkHandler, (void*)GuestThunkEntrypoint);
 
   if (Result.has_value()) {
@@ -1203,6 +1208,9 @@ void ContextImpl::FetchAOTIRCacheEntry(FEXCore::Core::InternalThreadState* Threa
       // TODO: Acquire write mutex?
 
       auto CodeBuffer = GetCurrentCodeBuffer();
+      if (Thread->CPUBackend->CheckCodeBufferUpdate()) {
+        ERROR_AND_DIE_FMT("CodeBuffer migration not yet supported here");
+      }
       auto& LookupCache = *Thread->LookupCache->Shared;
 
       // TODO: Verify source ELF is PIE, otherwise we'll need to factor in ELF relocations
@@ -1240,6 +1248,7 @@ void ContextImpl::FetchAOTIRCacheEntry(FEXCore::Core::InternalThreadState* Threa
       // TODO: Strip ASLR-dependence by relocating to base ELF offset
       // TODO: Verify this all relates to the dumped ELF (and not any of its dependencies)
       {
+        fextl::fmt::print(stderr, "Adding to {} existing blocks\n", LookupCache.BlockList.size());
         fextl::vector<decltype(LookupCache.BlockList)::value_type> BlockList(header.NumBlocks);
         ::read(fd, BlockList.data(), sizeof(BlockList[0]) * BlockList.size());
         for (auto& [Guest, Host] : BlockList) {

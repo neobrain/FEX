@@ -56,6 +56,7 @@ struct AOTIRCacheEntryLookupResult {
   fextl::string GetCacheEntryId() const;
 
   FEXCore::IR::AOTIRCacheEntry* Entry;
+  // TODO: Rename. This actually denotes the offset in virtual memory from the first mapping
   uintptr_t VAFileStart;
 
   friend class SyscallHandler;

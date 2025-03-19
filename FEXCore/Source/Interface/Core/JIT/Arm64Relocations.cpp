@@ -154,6 +154,7 @@ bool Arm64JITCore::ApplyRelocations(uint64_t GuestEntry, uint64_t CursorEntry, s
       uint64_t Pointer = Reloc.GuestRIPMove.GuestRIP + GuestEntry;
 
       // Re-emit constant in case it requires more/fewer instructions at the new location
+      // TODO: Can this overflow for 32-bit?
       SetCursorOffset(CursorEntry + Reloc.GuestRIPMove.Offset);
       LoadConstant(ARMEmitter::Size::i64Bit, ARMEmitter::Register(Reloc.GuestRIPMove.RegisterIndex), Pointer, true);
       break;

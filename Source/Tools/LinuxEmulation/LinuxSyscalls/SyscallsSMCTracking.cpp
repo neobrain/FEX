@@ -212,6 +212,8 @@ void SyscallHandler::ForEachVMAMapping(FEXCore::Core::InternalThreadState* Threa
     if (Entry.Prot.Executable) {
       fmt::print(stderr, "Visiting VMA entry {:#x} / {:#x}: {}\n", Base, Entry.Base - Entry.Offset,
                  *((fextl::string*)((char*)Entry.Resource->AOTIRCacheEntry + 32)) /* FileId */);
+      // TODO: Probably needs changes since we're using virtual address offsets instead of file offsets now
+      // ERROR_AND_DIE_FMT("FIX THIS NOW");
       Func(Entry.Resource->FirstVMA->Base);
     }
   }
@@ -259,6 +261,7 @@ void SyscallHandler::TrackMmap(FEXCore::Core::InternalThreadState* Thread, uintp
           // // TODO: Suppress or fix logging errors for non-ELF files
           // Elf.ReadElf(Filename);
 
+          // TODO: Skip unless mapped with executable permissions
           fmt::print(stderr, "Loading object {}\n", Filename);
 
           IsNewLibrary = true;
@@ -286,7 +289,7 @@ void SyscallHandler::TrackMmap(FEXCore::Core::InternalThreadState* Thread, uintp
 
 
   if (IsNewLibrary) {
-    fextl::fmt::print(stderr, "LOADING AOT CACHE ENTRY: {}\n", Filename);
+    fextl::fmt::print(stderr, "LOADING AOT CACHE ENTRY: {} to base {:#x}\n", Filename, Base);
     // TODO: Identify via ELF build id instead
     Resource->AOTIRCacheEntry = CTX->LoadAOTIRCacheEntry(std::move(Filename) /*Thread, Base, std::move(Filename), std::move(Elf.BuildID)*/);
     if (Thread) {
