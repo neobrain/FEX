@@ -449,6 +449,7 @@ void ContextImpl::InitializeCompiler(FEXCore::Core::InternalThreadState* Thread)
   Thread->PassManager->InsertRegisterAllocationPass();
   Thread->CPUBackend = FEXCore::CPU::CreateArm64JITCore(this, Thread);
   Thread->LookupCache->Shared = Thread->CPUBackend->CurrentCodeBuffer->LookupCache.get();
+  Thread->LookupCache->WriteLock = Thread->LookupCache->Shared->WriteLock;
 
   Thread->PassManager->Finalize();
 }
@@ -536,11 +537,13 @@ void ContextImpl::ClearCodeCache(FEXCore::Core::InternalThreadState* Thread, boo
   if (NewCodeBuffer) {
     // NOTE: Holding on to the reference here is required to ensure validity of the WriteLock mutex
     std::shared_ptr CurrentCodeBuffer = Thread->CPUBackend->CurrentCodeBuffer;
-    std::lock_guard lk(CurrentCodeBuffer->LookupCache->WriteLock);
+    std::lock_guard<std::recursive_mutex> lk(CurrentCodeBuffer->LookupCache->WriteLock);
 
     // Allocate new CodeBuffer + L3 LookupCache, then clear L1+L2 caches
     Thread->CPUBackend->ClearCache();
-    Thread->LookupCache->ChangeGuestToHostMapping(*Thread->CPUBackend->CurrentCodeBuffer->LookupCache);
+    Thread->LookupCache->Shared = Thread->CPUBackend->CurrentCodeBuffer->LookupCache.get();
+    Thread->LookupCache->WriteLock = Thread->LookupCache->Shared->WriteLock;
+    Thread->LookupCache->ClearThreadLocalCaches();
   } else {
     // Clear L1+L2 cache of this thread, and clear L3 cache across any threads using it
     Thread->LookupCache->ClearCache();
@@ -1028,8 +1031,8 @@ uintptr_t ContextImpl::CompileSingleStep(FEXCore::Core::CpuStateFrame* Frame, ui
   return (uintptr_t)CodePtr;
 }
 
-void ContextImpl::InvalidateGuestCodeRange(FEXCore::Core::InternalThreadState* Thread, uint64_t Start, uint64_t Length) {
-  auto lk = Thread->LookupCache->AcquireLock();
+static void InvalidateGuestThreadCodeRange(FEXCore::Core::InternalThreadState* Thread, uint64_t Start, uint64_t Length) {
+  std::lock_guard<std::recursive_mutex> lk(Thread->LookupCache->WriteLock);
 
   // auto lower = Thread->LookupCache->Shared->CodePages.lower_bound(Start >> 12);
   // auto upper = Thread->LookupCache->Shared->CodePages.upper_bound((Start + Length - 1) >> 12);
@@ -1044,6 +1047,16 @@ void ContextImpl::InvalidateGuestCodeRange(FEXCore::Core::InternalThreadState* T
   }
 }
 
+void ContextImpl::InvalidateGuestCodeRange(FEXCore::Core::InternalThreadState* Thread, uint64_t Start, uint64_t Length) {
+  InvalidateGuestThreadCodeRange(Thread, Start, Length);
+}
+
+void ContextImpl::InvalidateGuestCodeRange(FEXCore::Core::InternalThreadState* Thread, uint64_t Start, uint64_t Length,
+                                           CodeRangeInvalidationFn CallAfter) {
+  InvalidateGuestThreadCodeRange(Thread, Start, Length);
+  CallAfter(Start, Length);
+}
+
 void ContextImpl::MarkMemoryShared(FEXCore::Core::InternalThreadState* Thread) {
   if (!Thread) {
     return;
@@ -1055,8 +1068,7 @@ void ContextImpl::MarkMemoryShared(FEXCore::Core::InternalThreadState* Thread) {
 
     if (Config.TSOAutoMigration) {
       // Only the lookup cache is cleared here, so that old code can keep running until next compilation
-      // TODO: Review if this will clear the old code *eventually*. It's probably safe to fully clear the GuestToHostMap?
-      auto lk = Thread->LookupCache->AcquireLock();
+      std::lock_guard<std::recursive_mutex> lkLookupCache(Thread->LookupCache->WriteLock);
       Thread->LookupCache->ClearCache();
     }
   }
@@ -1146,11 +1158,8 @@ void ContextImpl::RemoveCustomIREntrypoint(uintptr_t Entrypoint) {
 
   std::scoped_lock lk(CustomIRMutex);
 
-  // TODO: Must invalidate L1/L2 caches for other threads...
-  ERROR_AND_DIE_FMT("TODO: Must ensure L1/L2 cache for other threads is invalidated");
-  InvalidateGuestCodeRange(nullptr, Entrypoint, 1);
+  InvalidateGuestCodeRange(nullptr, Entrypoint, 1, [this](uint64_t Entrypoint, uint64_t) { CustomIRHandlers.erase(Entrypoint); });
 
-  CustomIRHandlers.erase(Entrypoint);
   HasCustomIRHandlers = !CustomIRHandlers.empty();
 }
 

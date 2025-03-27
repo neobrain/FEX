@@ -815,7 +815,9 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
     ERROR_AND_DIE_FMT("no way");
   }
   if (CheckCodeBufferUpdate()) {
-    ThreadState->LookupCache->ChangeGuestToHostMapping(*CurrentCodeBuffer->LookupCache);
+    ThreadState->LookupCache->ClearThreadLocalCaches();
+    ThreadState->LookupCache->Shared = CurrentCodeBuffer->LookupCache.get();
+    ThreadState->LookupCache->WriteLock = ThreadState->LookupCache->Shared->WriteLock;
   }
   XYZ.reset();
 

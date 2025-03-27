@@ -84,10 +84,11 @@ bool SyscallHandler::HandleSegfault(FEXCore::Core::InternalThreadState* Thread, 
 
       auto Offset = FaultBase - Entry->first + Entry->second.Offset;
 
-      LOGMAN_THROW_A_FMT(!Entry->second.Resource->VMAs.empty(), "VMA tracking error");
+      auto VMA = Entry->second.Resource->FirstVMA;
+      LOGMAN_THROW_A_FMT(VMA, "VMA tracking error");
 
       // Flush all mirrors, remap the page writable as needed
-      for (auto VMA : Entry->second.Resource->VMAs) {
+      do {
         if (VMA->Offset <= Offset && (VMA->Offset + VMA->Length) > Offset) {
           auto FaultBaseMirrored = Offset - VMA->Offset + VMA->Base;
 
@@ -101,7 +102,7 @@ bool SyscallHandler::HandleSegfault(FEXCore::Core::InternalThreadState* Thread, 
             _SyscallHandler->TM.InvalidateGuestCodeRange(Thread, FaultBaseMirrored, FEXCore::Utils::FEX_PAGE_SIZE);
           }
         }
-      }
+      } while ((VMA = VMA->ResourceNextVMA));
     } else {
       _SyscallHandler->TM.InvalidateGuestCodeRange(Thread, FaultBase, FEXCore::Utils::FEX_PAGE_SIZE, [](uintptr_t Start, uintptr_t Length) {
         auto rv = mprotect((void*)Start, Length, PROT_READ | PROT_WRITE);
@@ -148,8 +149,10 @@ void SyscallHandler::MarkGuestExecutableRange(FEXCore::Core::InternalThreadState
           const auto OffsetBase = ProtectBase - Mapping->first + Mapping->second.Offset;
           const auto OffsetTop = OffsetBase + ProtectSize;
 
-          LOGMAN_THROW_A_FMT(!Mapping->second.Resource->VMAs.empty(), "VMA tracking error");
-          for (auto VMA : Mapping->second.Resource->VMAs) {
+          auto VMA = Mapping->second.Resource->FirstVMA;
+          LOGMAN_THROW_A_FMT(VMA, "VMA tracking error");
+
+          do {
             auto VMAOffsetBase = VMA->Offset;
             auto VMAOffsetTop = VMA->Offset + VMA->Length;
             auto VMABase = VMA->Base;
@@ -162,7 +165,7 @@ void SyscallHandler::MarkGuestExecutableRange(FEXCore::Core::InternalThreadState
               auto rv = mprotect((void*)(MirroredBase - VMAOffsetBase + VMABase), MirroredSize, PROT_READ);
               LogMan::Throw::AFmt(rv == 0, "mprotect({}, {}) failed", MirroredBase, MirroredSize);
             }
-          }
+          } while ((VMA = VMA->ResourceNextVMA));
 
         } else if (Mapping->second.Prot.Writable) {
           int rv = mprotect((void*)ProtectBase, ProtectSize, PROT_READ);
@@ -186,9 +189,19 @@ FEXCore::HLE::AOTIRCacheEntryLookupResult SyscallHandler::LookupAOTIRCacheEntry(
     return {nullptr, 0};
   }
 
+  // The order we store VMAs in seems to be backwards compared to their actual mapping order... Just iterate over all of them to find the true base address
+  auto* VMA = Entry->second.Resource ? Entry->second.Resource->FirstVMA : nullptr;
+  auto* TopVMA = VMA;
+  while (VMA) {
+    if (VMA->Base < TopVMA->Base) {
+      TopVMA = VMA;
+    }
+    VMA = VMA->ResourceNextVMA;
+  }
+
   // TODO: Should Entry->second.Resource ever be 0 ?
   return {Entry->second.Resource ? Entry->second.Resource->AOTIRCacheEntry : nullptr,
-          Entry->second.Resource ? Entry->second.Resource->VMAs.front()->Base : 0 /*Entry->second.Base - (TopVMA ? TopVMA->Base : 0)*/};
+          TopVMA ? TopVMA->Base : 0 /*Entry->second.Base - (TopVMA ? TopVMA->Base : 0)*/};
 }
 
 void SyscallHandler::ForEachVMAMapping(FEXCore::Core::InternalThreadState* Thread, std::function<void(uint64_t)> Func) {
@@ -199,7 +212,7 @@ void SyscallHandler::ForEachVMAMapping(FEXCore::Core::InternalThreadState* Threa
     if (Entry.Prot.Executable) {
       fmt::print(stderr, "Visiting VMA entry {:#x} / {:#x}: {}\n", Base, Entry.Base - Entry.Offset,
                  *((fextl::string*)((char*)Entry.Resource->AOTIRCacheEntry + 32)) /* FileId */);
-      Func(Entry.Resource->VMAs.front()->Base);
+      Func(Entry.Resource->FirstVMA->Base);
     }
   }
 }
@@ -237,7 +250,7 @@ void SyscallHandler::TrackMmap(FEXCore::Core::InternalThreadState* Thread, uintp
 
       if (PathLength != -1) {
         Tmp[PathLength] = '\0';
-        auto [Iter, Inserted] = VMATracking.MappedResources.emplace(mrid, MappedResource {nullptr, {}, 0});
+        auto [Iter, Inserted] = VMATracking.MappedResources.emplace(mrid, MappedResource {nullptr, nullptr, 0});
         Resource = &Iter->second;
 
         if (Inserted) {
@@ -255,7 +268,7 @@ void SyscallHandler::TrackMmap(FEXCore::Core::InternalThreadState* Thread, uintp
     } else if (Flags & MAP_SHARED) {
       MRID mrid {SpecialDev::Anon, AnonSharedId++};
 
-      auto [Iter, Inserted] = VMATracking.MappedResources.emplace(mrid, MappedResource {nullptr, {}, 0});
+      auto [Iter, Inserted] = VMATracking.MappedResources.emplace(mrid, MappedResource {nullptr, nullptr, 0});
       LOGMAN_THROW_A_FMT(Inserted == true, "VMA tracking error");
       Resource = &Iter->second;
       Resource->Iterator = Iter;
@@ -386,7 +399,7 @@ void SyscallHandler::TrackShmat(FEXCore::Core::InternalThreadState* Thread, int 
     // TODO
     MRID mrid {SpecialDev::SHM, static_cast<uint64_t>(shmid)};
 
-    auto ResourceInserted = VMATracking.MappedResources.insert({mrid, {nullptr, {}, Length}});
+    auto ResourceInserted = VMATracking.MappedResources.insert({mrid, {nullptr, nullptr, Length}});
     auto Resource = &ResourceInserted.first->second;
     if (ResourceInserted.second) {
       Resource->Iterator = ResourceInserted.first;

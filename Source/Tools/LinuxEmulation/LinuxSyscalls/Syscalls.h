@@ -358,8 +358,8 @@ private:
 
     // Non-owning reference
     FEXCore::IR::AOTIRCacheEntry* AOTIRCacheEntry;
-    // References to memory ranges this resource is mapped to
-    std::vector<VMAEntry*> VMAs;
+    // Pointer to lowest memory range this file is mapped to
+    VMAEntry* FirstVMA;
     uint64_t Length; // 0 if not fixed size
     ContainerType::iterator Iterator;
   };
@@ -385,6 +385,10 @@ private:
 
   struct VMAEntry {
     MappedResource* Resource;
+
+    // these are for intrusive linked list tracking, starting from Resource->FirstVMA and ordered by address
+    VMAEntry* ResourcePrevVMA;
+    VMAEntry* ResourceNextVMA;
 
     uint64_t Base;
     uint64_t Offset;
@@ -426,7 +430,8 @@ private:
     bool ListRemove(VMAEntry* Mapping);
     void ListReplace(VMAEntry* Mapping, VMAEntry* NewMapping);
     void ListInsertAfter(VMAEntry* Mapping, VMAEntry* NewMapping);
-    void ListPrepend(MappedResource& Resource, VMAEntry* NewVMA);
+    void ListPrepend(MappedResource* Resource, VMAEntry* NewVMA);
+    static void ListCheckVMALinks(VMAEntry* VMA);
   } VMATracking;
 };
 

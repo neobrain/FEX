@@ -404,7 +404,7 @@ namespace CPU {
     return false;
   }
 
-  GuestToHostMap& GetLookupCache(const CodeBuffer& Buffer) {
+  SharedLookupCache& GetLookupCache(const CodeBuffer& Buffer) {
     return *Buffer.LookupCache;
   }
 
@@ -416,7 +416,7 @@ namespace CPU {
     FEXTracyPlot("CodeBufferSize", static_cast<int64_t>(TotalCodeBufferSize += Size));
 #endif
     LOGMAN_THROW_A_FMT(!!Ptr, "Couldn't allocate code buffer");
-    LookupCache = fextl::make_unique<GuestToHostMap>();
+    LookupCache = fextl::make_unique<SharedLookupCache>();
   }
 
   CodeBuffer::CodeBuffer(CodeBuffer&& oth)

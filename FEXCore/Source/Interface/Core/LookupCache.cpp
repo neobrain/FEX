@@ -14,7 +14,7 @@ $end_info$
 #include "Interface/Core/LookupCache.h"
 
 namespace FEXCore {
-GuestToHostMap::GuestToHostMap()
+SharedLookupCache::SharedLookupCache()
   : BlockLinks_mbr {fextl::pmr::get_default_resource()} {
   BlockLinks_pma = fextl::make_unique<std::pmr::polymorphic_allocator<std::byte>>(&BlockLinks_mbr);
   // Setup our PMR map.
@@ -22,7 +22,7 @@ GuestToHostMap::GuestToHostMap()
   // fmt::print(stderr, "Creating SharedLookupCache {}\n", fmt::ptr(this));
 }
 
-GuestToHostMap::~GuestToHostMap() {
+SharedLookupCache::~SharedLookupCache() {
   // fmt::print(stderr, "Deleting SharedLookupCache {}\n", fmt::ptr(this));
 }
 LookupCache::LookupCache(FEXCore::Context::ContextImpl* CTX)
@@ -69,7 +69,7 @@ LookupCache::~LookupCache() {
 }
 
 void LookupCache::ClearL2Cache() {
-  auto lk = Shared->AcquireLock();
+  std::lock_guard<std::recursive_mutex> lk(WriteLock);
   // Clear out the page memory
   // PagePointer and PageMemory are sequential with each other. Clear both at once.
   FEXCore::Allocator::VirtualDontNeed(reinterpret_cast<void*>(PagePointer), ctx->Config.VirtualMemSize / 4096 * 8 + CODE_SIZE, false);
@@ -77,22 +77,22 @@ void LookupCache::ClearL2Cache() {
 }
 
 void LookupCache::ClearThreadLocalCaches() {
-  auto lk = Shared->AcquireLock();
+  std::lock_guard<std::recursive_mutex> lk(WriteLock);
 
   // Clear L1 and L2 by clearing the full cache.
   FEXCore::Allocator::VirtualDontNeed(reinterpret_cast<void*>(PagePointer), TotalCacheSize, false);
 }
 
 void LookupCache::ClearCache() {
-  auto lk = Shared->AcquireLock();
+  std::lock_guard<std::recursive_mutex> lk(WriteLock);
 
   // Clear L1 and L2 by clearing the full cache.
   FEXCore::Allocator::VirtualDontNeed(reinterpret_cast<void*>(PagePointer), TotalCacheSize, false);
 
-  Shared->ClearCache(lk);
+  Shared->ClearCache();
 }
 
-void GuestToHostMap::ClearCache(const LockToken&) {
+void SharedLookupCache::ClearCache() {
   // Allocate a new pointer from the BlockLinks pma again.
   BlockLinks = BlockLinks_pma->new_object<BlockLinksMapType>();
   // All code is gone, clear the block list

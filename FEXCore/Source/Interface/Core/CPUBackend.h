@@ -107,7 +107,7 @@ namespace CodeSerialize {
   struct CodeObjectFileSection;
 }
 
-struct GuestToHostMap;
+struct SharedLookupCache;
 
 namespace CPU {
   struct CodeBuffer {
@@ -118,7 +118,7 @@ namespace CPU {
 
     std::shared_ptr<CodeBuffer> next;
 
-    fextl::unique_ptr<GuestToHostMap> LookupCache;
+    fextl::unique_ptr<SharedLookupCache> LookupCache;
 
     CodeBuffer(size_t Size);
     CodeBuffer(const CodeBuffer&) = delete;
