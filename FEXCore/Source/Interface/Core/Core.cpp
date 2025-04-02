@@ -559,8 +559,7 @@ ContextImpl::GenerateIR(FEXCore::Core::InternalThreadState* Thread, uint64_t Gue
     bool HadDispatchError {false};
     bool HadInvalidInst {false};
 
-    Thread->FrontendDecoder->DecodeInstructionsAtEntry(GuestCode, GuestRIP, MaxInst,
-                                                       [Thread](uint64_t BlockEntry, uint64_t Start, uint64_t Length) {
+    Thread->FrontendDecoder->DecodeInstructionsAtEntry(GuestCode, GuestRIP, MaxInst, [Thread](uint64_t BlockEntry, uint64_t Start, uint64_t Length) {
       if (Thread->LookupCache->AddBlockExecutableRange(BlockEntry, Start, Length)) {
         static_cast<ContextImpl*>(Thread->CTX)->SyscallHandler->MarkGuestExecutableRange(Thread, Start, Length);
       }
@@ -978,7 +977,7 @@ void ContextImpl::AddThunkTrampolineIRHandler(uintptr_t Entrypoint, uintptr_t Gu
                           offsetof(Core::CPUState, mm[0][0]));
     }
     emit->_ExitFunction(emit->_Constant(GuestThunkEntrypoint));
-    },
+  },
     ThunkHandler, (void*)GuestThunkEntrypoint);
 
   if (Result.has_value()) {
