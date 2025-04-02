@@ -117,6 +117,15 @@ namespace Tracy {
 static int EnableAfterFork = 0;
 static bool Enable = false;
 
+static void SetupGraphs() {
+  TracyPlotConfig("CodeBufferSize", tracy::PlotFormatType::Memory, true, true, 0);
+  TracyPlotConfig("CodeBufferSizeUsed", tracy::PlotFormatType::Percentage, true, true, 0);
+  TracyPlotConfig("CodeBufferCount", tracy::PlotFormatType::Number, true, false, 0);
+
+  // TODO: Measure total time spent in the JIT
+  // TODO: Double-check numbers via heaptrack
+}
+
 void Init(std::string_view ProgramName, std::string_view ProgramPath) {
   const char* ProfileTargetName = getenv("FEX_PROFILE_TARGET_NAME"); // Match by application name
   const char* ProfileTargetPath = getenv("FEX_PROFILE_TARGET_PATH"); // Match by path suffix
@@ -128,6 +137,7 @@ void Init(std::string_view ProgramName, std::string_view ProgramPath) {
   Enable = Matched && !EnableAfterFork;
   if (Enable) {
     tracy::StartupProfiler();
+    SetupGraphs();
     LogMan::Msg::IFmt("Tracy profiling started");
   } else if (EnableAfterFork) {
     LogMan::Msg::IFmt("Tracy profiling will start after fork");
@@ -153,6 +163,7 @@ void PostForkAction(bool IsChild) {
     Enable = true;
     EnableAfterFork = 0;
     tracy::StartupProfiler();
+    SetupGraphs();
     LogMan::Msg::IFmt("Tracy profiling started");
   }
 }

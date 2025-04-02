@@ -16,17 +16,8 @@
 
 namespace FEXCore {
 
-struct GuestToHostMap {
+struct SharedLookupCache {
   std::recursive_mutex WriteLock;
-
-  struct LockToken {
-    std::lock_guard<std::recursive_mutex> Lock;
-  };
-
-  [[nodiscard]]
-  LockToken AcquireLock() {
-    return LockToken {std::lock_guard {WriteLock}};
-  }
 
   struct BlockLinkTag {
     uint64_t GuestDestination;
@@ -57,19 +48,36 @@ struct GuestToHostMap {
   // TODO: Should be shared across threads... Also BlockLinks, perhaps?
   fextl::robin_map<uint64_t, uint64_t> BlockList;
 
-  GuestToHostMap();
-  ~GuestToHostMap();
+  SharedLookupCache();
+  ~SharedLookupCache();
+
+  // Appends Block {Address} to CodePages [Start, Start + Length)
+  // Returns true if new pages are marked as containing code
+  // TODO: May need to be thread-specific after all
+  // bool AddBlockExecutableRange(uint64_t Address, uint64_t Start, uint64_t Length) {
+  //   bool rv = false;
+
+  //   for (auto CurrentPage = Start >> 12, EndPage = (Start + Length - 1) >> 12; CurrentPage <= EndPage; CurrentPage++) {
+  //     auto& CodePage = CodePages[CurrentPage];
+  //     rv |= CodePage.empty();
+  //     CodePage.push_back(Address);
+  //   }
+
+  //   return rv;
+  // }
 
   // Adds to Guest -> Host code mapping
-  void AddBlockMapping(uint64_t Address, void* HostCode, const LockToken&) {
-    [[maybe_unused]] auto Inserted = BlockList.emplace(Address, (uintptr_t)HostCode).second;
+  void AddBlockMapping(uint64_t Address, void* HostCode) {
+    [[maybe_unused]]
+    auto Inserted = BlockList.emplace(Address, (uintptr_t)HostCode).second;
     // NOTE: If this was inserted twice, we've probably raced against another thread to compile this block. Just ignore this one
     // TODO: Should reset CodeBuffer cursor in that case...
 
+    // TODO: Should this fail?
     // LOGMAN_THROW_A_FMT(Inserted, "Duplicate block mapping added");
   }
 
-  std::optional<uintptr_t> FindBlock(uint64_t Address, const LockToken&) {
+  std::optional<uintptr_t> FindBlock(uint64_t Address) {
     auto HostCode = BlockList.find(Address);
     if (HostCode == BlockList.end()) {
       return std::nullopt;
@@ -77,7 +85,7 @@ struct GuestToHostMap {
     return HostCode->second;
   }
 
-  void Erase(FEXCore::Core::CpuStateFrame* Frame, uint64_t Address, const LockToken&) {
+  void Erase(FEXCore::Core::CpuStateFrame* Frame, uint64_t Address) {
     // Sever any links to this block
     auto lower = BlockLinks->lower_bound({Address, nullptr});
     auto upper = BlockLinks->upper_bound({Address, reinterpret_cast<FEXCore::Context::ExitFunctionLinkData*>(UINTPTR_MAX)});
@@ -90,12 +98,11 @@ struct GuestToHostMap {
     BlockList.erase(Address);
   }
 
-  void AddBlockLink(uint64_t GuestDestination, FEXCore::Context::ExitFunctionLinkData* HostLink,
-                    const FEXCore::Context::BlockDelinkerFunc& delinker, const LockToken&) {
+  void AddBlockLink(uint64_t GuestDestination, FEXCore::Context::ExitFunctionLinkData* HostLink, const FEXCore::Context::BlockDelinkerFunc& delinker) {
     BlockLinks->insert({{GuestDestination, HostLink}, delinker});
   }
 
-  void ClearCache(const LockToken&);
+  void ClearCache();
 };
 
 class LookupCache {
@@ -108,13 +115,6 @@ public:
   LookupCache(FEXCore::Context::ContextImpl* CTX);
   ~LookupCache();
 
-  // Swaps out the underlying GuestToHostMap and clears all associated caches.
-  // This interface requires the previous CodeBuffer to be provided despite not using it. This ensures the shared write lock is still valid.
-  void ChangeGuestToHostMapping([[maybe_unused]] CPU::CodeBuffer& Prev, GuestToHostMap& NewMap) {
-    ClearThreadLocalCaches();
-    Shared = &NewMap;
-  }
-
   uintptr_t FindBlock(uint64_t Address) {
     // Try L1, no lock needed
     auto& L1Entry = reinterpret_cast<LookupCacheEntry*>(L1Pointer)[Address & L1_ENTRIES_MASK];
@@ -123,7 +123,7 @@ public:
     }
 
     // L2 and L3 need to be locked
-    auto lk = Shared->AcquireLock();
+    std::lock_guard<std::recursive_mutex> lk(WriteLock);
 
     // Try L2
     const auto PageIndex = (Address & (VirtualMemSize - 1)) >> 12;
@@ -145,7 +145,7 @@ public:
     }
 
     // Try L3
-    auto HostCode = Shared->FindBlock(Address, lk);
+    auto HostCode = Shared->FindBlock(Address);
     if (HostCode) {
       CacheBlockMapping(Address, HostCode.value());
       return HostCode.value();
@@ -155,14 +155,17 @@ public:
     return 0;
   }
 
-  GuestToHostMap* Shared = nullptr;
+  // TODO: Consider making this std::atomic
+  SharedLookupCache* Shared = nullptr;
 
   fextl::map<uint64_t, fextl::vector<uint64_t>> CodePages;
 
   // Appends Block {Address} to CodePages [Start, Start + Length)
   // Returns true if new pages are marked as containing code
   bool AddBlockExecutableRange(uint64_t Address, uint64_t Start, uint64_t Length) {
-    auto lk = Shared->AcquireLock();
+    // TODO: Move WriteLock to SharedLookupCache
+    std::lock_guard<std::recursive_mutex> lk(WriteLock);
+    // return Shared->AddBlockExecutableRange(Address, Start, Length);
     bool rv = false;
 
     for (auto CurrentPage = Start >> 12, EndPage = (Start + Length - 1) >> 12; CurrentPage <= EndPage; CurrentPage++) {
@@ -176,9 +179,9 @@ public:
 
   // Adds to Guest -> Host code mapping
   void AddBlockMapping(uint64_t Address, void* HostCode) {
-    auto lk = Shared->AcquireLock();
+    std::lock_guard<std::recursive_mutex> lk(WriteLock);
 
-    Shared->AddBlockMapping(Address, HostCode, lk);
+    Shared->AddBlockMapping(Address, HostCode);
 
     // There is no need to update L1 or L2, they will get updated on first lookup
     // However, adding to L1 here increases performance
@@ -187,15 +190,13 @@ public:
     L1Entry.HostCode = (uintptr_t)HostCode;
   }
 
-  // NOTE: It's the caller's responsibility to call Erase() for all other
-  //       GuestToHostMaps that share the same LookupCache. Otherwise, the
-  //       L1/L2 caches will contain stale references to deallocated memory.
   void Erase(FEXCore::Core::CpuStateFrame* Frame, uint64_t Address) {
-    auto lk = Shared->AcquireLock();
+
+    std::lock_guard<std::recursive_mutex> lk(WriteLock);
 
     // TODO: Is there a hard requirement for L1 to be erased *after* BlockLinks but *before* PagePointer?
 
-    Shared->Erase(Frame, Address, lk);
+    Shared->Erase(Frame, Address);
 
     // Do L1
     auto& L1Entry = reinterpret_cast<LookupCacheEntry*>(L1Pointer)[Address & L1_ENTRIES_MASK];
@@ -225,8 +226,9 @@ public:
   }
 
   void AddBlockLink(uint64_t GuestDestination, FEXCore::Context::ExitFunctionLinkData* HostLink, const FEXCore::Context::BlockDelinkerFunc& delinker) {
-    auto lk = Shared->AcquireLock();
-    Shared->AddBlockLink(GuestDestination, HostLink, delinker, lk);
+    std::lock_guard<std::recursive_mutex> lk(WriteLock);
+
+    Shared->AddBlockLink(GuestDestination, HostLink, delinker);
   }
 
   void ClearCache();
@@ -253,9 +255,9 @@ public:
   // Some care is taken so that L1 lookups can be done without locks, and even tearing is unlikely to lead to a crash.
   // This approach has not been fully vetted yet.
   // Also note that L1 lookups might be inlined in the JIT Dispatcher and/or block ends.
-  auto AcquireLock() {
-    return Shared->AcquireLock();
-  }
+  // TODO: Split into separate mutexes for SharedLookupCache and L1+L2 caches
+  // std::recursive_mutex& WriteLock = Shared->WriteLock;
+  std::reference_wrapper<std::recursive_mutex> WriteLock = Shared->WriteLock;
 
 private:
   void CacheBlockMapping(uint64_t Address, uintptr_t HostCode) {
