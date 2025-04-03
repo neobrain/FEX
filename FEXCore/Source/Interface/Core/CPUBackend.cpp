@@ -359,12 +359,12 @@ namespace CPU {
         SignalHandlerCodeBuffers.clear();
       }
 
-      fmt::print(stderr, "... now have {} buffers in total\n", manager.CodeBuffers.size());
-      for (auto CodeBufferIt = manager.CodeBuffers.begin(); CodeBufferIt != manager.CodeBuffers.end(); ++CodeBufferIt) {
-        auto Buffer = CodeBufferIt->lock();
-        fmt::print(stderr, "    {} KiB: {} uses{}{}\n", Buffer->Size / 1024, Buffer.use_count() - 1 - (Buffer == CurrentCodeBuffer),
-                   Buffer == manager.Latest ? " (active)" : "", Buffer == CurrentCodeBuffer ? " (previous in thread)" : "");
-      }
+      // fmt::print(stderr, "... now have {} buffers in total\n", manager.CodeBuffers.size());
+      // for (auto CodeBufferIt = manager.CodeBuffers.begin(); CodeBufferIt != manager.CodeBuffers.end(); ++CodeBufferIt) {
+      //   auto Buffer = CodeBufferIt->lock();
+      //   fmt::print(stderr, "    {} KiB: {} uses{}{}\n", Buffer->Size / 1024, Buffer.use_count() - 1 - (Buffer == CurrentCodeBuffer),
+      //              Buffer == manager.Latest ? " (active)" : "", Buffer == CurrentCodeBuffer ? " (previous in thread)" : "");
+      // }
       return std::exchange(CurrentCodeBuffer, NewCodeBuffer);
     }
     return nullptr;
