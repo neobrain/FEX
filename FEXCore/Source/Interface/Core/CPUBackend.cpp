@@ -310,15 +310,27 @@ namespace CPU {
 
   mymutex codebuffermutex;
 
-  CPUBackend::~CPUBackend() = default;
+  CPUBackend::~CPUBackend() {
+    auto lock = codebuffermutex.AcquireLock();
+    CurrentCodeBuffer.reset();
+    SignalHandlerCodeBuffers.clear();
+    // TODO: Use this opportunity to clear stale weak_ptr references in manager
+    // while (!CodeBuffers.empty()) {
+    //   manager.ReleaseCodeBuffer(std::move(CodeBuffers.front()));
+    //   CodeBuffers.pop_front();
+    // }
+  }
 
   auto CPUBackend::GetEmptyCodeBuffer() -> CodeBuffer* {
+    // auto lock = codebuffermutex.AcquireLock();
+    codebuffermutex.AssertIsLocked();
+    // fmt::print(stderr, "GetEmptyCodeBuffer {}.{}\n", ::getpid(), ::gettid());
     auto PrevCodeBuffer = CurrentCodeBuffer;
 
     // Resize the code buffer and reallocate our code size
     // TODO: Reconsider whether we should apply a maximum here
     // TODO: Handle the CodeBuffers.empty() case more cleanly
-    if (!manager.Latest) {
+    if (manager.CodeBuffers.empty()) {
       // Allocate initial CodeBuffer and return it
       CurrentCodeBuffer = manager.GetCurrentCodeBuffer();
     } else {
@@ -336,6 +348,7 @@ namespace CPU {
       // Keep a reference to the old code buffer to delay deallocation
       // TODO: Clear SignalHandlerCodeBuffers once SignalHandlerRefCounter reaches 0 again
       // TODO: Actually, this should be added when entering the signal handler...
+      fprintf(stderr, "Adding CodeBuffer reference for signal handle\n");
       SignalHandlerCodeBuffers.push_back(PrevCodeBuffer);
     } else {
       SignalHandlerCodeBuffers.clear();
@@ -344,8 +357,8 @@ namespace CPU {
     return CurrentCodeBuffer.get();
   }
 
-  fextl::shared_ptr<CodeBuffer> CPUBackend::CheckCodeBufferUpdate() {
-    fextl::shared_ptr<CodeBuffer> OldCodeBuffer;
+  bool CPUBackend::CheckCodeBufferUpdate() {
+    codebuffermutex.AssertIsLocked();
     auto NewCodeBuffer = manager.GetCurrentCodeBuffer();
     if (CurrentCodeBuffer != NewCodeBuffer) {
       fextl::fmt::print(stderr, "Moving to new CodeBuffer generation in thread {}.{}\n", ::getpid(), ::gettid());
@@ -353,26 +366,42 @@ namespace CPU {
       FEXTracyMessageL("Updating CodeBuffer");
 #endif
 
+      auto Prev = CurrentCodeBuffer;
       if (ThreadState->CurrentFrame->SignalHandlerRefCounter != 0) {
         // We have signal handlers that have generated code
         // This means that we can not safely clear the code at this point in time
         // Keep a reference to the old code buffer to delay deallocation
         // TODO: Clear SignalHandlerCodeBuffers once SignalHandlerRefCounter reaches 0 again
         // TODO: Actually, this should be added when entering the signal handler...
-        SignalHandlerCodeBuffers.push_back(CurrentCodeBuffer);
+        // fprintf(stderr, "ADDING CodeBuffer reference for signal handle\n");
+        SignalHandlerCodeBuffers.push_back(Prev);
       } else {
         SignalHandlerCodeBuffers.clear();
       }
 
-      // fmt::print(stderr, "... now have {} buffers in total\n", manager.CodeBuffers.size());
-      // for (auto CodeBufferIt = manager.CodeBuffers.begin(); CodeBufferIt != manager.CodeBuffers.end(); ++CodeBufferIt) {
-      //   auto Buffer = CodeBufferIt->lock();
-      //   fmt::print(stderr, "    {} KiB: {} uses{}{}\n", Buffer->Size / 1024, Buffer.use_count() - 1 - (Buffer == CurrentCodeBuffer),
-      //              Buffer == manager.Latest ? " (active)" : "", Buffer == CurrentCodeBuffer ? " (previous in thread)" : "");
-      // }
-      return std::exchange(CurrentCodeBuffer, NewCodeBuffer);
+
+      CurrentCodeBuffer = NewCodeBuffer;
+      // TODO: Release code buffer if count is zero...
+      // TODO: Associate each CodeBuffer with a LookupCache template?
+      for (auto CodeBufferIt = manager.CodeBuffers.begin(); CodeBufferIt != manager.CodeBuffers.end();) {
+        if (CodeBufferIt->expired()) {
+          CodeBufferIt = manager.CodeBuffers.erase(CodeBufferIt);
+          FEXTracyPlot("CodeBufferCount", static_cast<int64_t>(manager.CodeBuffers.size()));
+        } else {
+          ++CodeBufferIt;
+        }
+      }
+      NewCodeBuffer.reset();
+
+      fmt::print(stderr, "... now have {} buffers in total\n", manager.CodeBuffers.size());
+      for (auto CodeBufferIt = manager.CodeBuffers.begin(); CodeBufferIt != manager.CodeBuffers.end(); ++CodeBufferIt) {
+        auto Buffer = CodeBufferIt->lock();
+        fmt::print(stderr, "    {} KiB: {} uses{}{}\n", Buffer->Size / 1024, Buffer.use_count() - 1 - (Buffer == Prev),
+                   Buffer == manager.Latest ? " (active)" : "", Buffer == Prev ? " (previous in thread)" : "");
+      }
+      return true;
     }
-    return nullptr;
+    return false;
   }
 
   GuestToHostMap& GetLookupCache(const CodeBuffer& Buffer) {
@@ -381,6 +410,7 @@ namespace CPU {
 
   CodeBuffer::CodeBuffer(size_t Size)
     : Size(Size) {
+    codebuffermutex.AssertIsLocked();
     Ptr = static_cast<uint8_t*>(FEXCore::Allocator::VirtualAlloc(Size, true));
 #ifdef ENABLE_FEXCORE_PROFILER
     FEXTracyPlot("CodeBufferSize", static_cast<int64_t>(TotalCodeBufferSize += Size));
@@ -389,8 +419,18 @@ namespace CPU {
     LookupCache = fextl::make_unique<GuestToHostMap>();
   }
 
+  CodeBuffer::CodeBuffer(CodeBuffer&& oth)
+    : Ptr(oth.Ptr)
+    , Size(oth.Size)
+    , next(std::move(oth.next))
+    , LookupCache(std::move(oth.LookupCache)) {
+    oth.Ptr = nullptr;
+    oth.Size = 0;
+  }
+
   CodeBuffer::~CodeBuffer() {
     // TODO: Verify refcounts get appropriately released on forks!
+    codebuffermutex.AssertIsLocked();
 #ifdef ENABLE_FEXCORE_PROFILER
     FEXTracyPlot("CodeBufferSize", static_cast<int64_t>(TotalCodeBufferSize -= Size));
     FEXTracyPlot("CodeBufferSizeUsed", static_cast<int64_t>(TotalCodeBufferSizeUsed) /** 100.f / TotalCodeBufferSize*/);
@@ -402,6 +442,7 @@ namespace CPU {
   }
 
   auto CodeBufferManager::AllocateNewCodeBuffer(size_t Size) -> fextl::shared_ptr<CodeBuffer> {
+    codebuffermutex.AssertIsLocked();
 #ifndef _WIN32
 // MDWE (Memory-Deny-Write-Execute) is a new Linux 6.3 feature.
 // It's equivalent to systemd's `MemoryDenyWriteExecute` but implemented entirely in the kernel.
@@ -434,17 +475,28 @@ namespace CPU {
     //   static_cast<Context::ContextImpl*>(ThreadState->CTX)->Symbols.RegisterJITSpace(Buffer.Ptr, Buffer.Size);
     // }
 
+    CodeBuffers.push_back(Buffer);
     Latest = Buffer;
     LatestOffset = 0;
 
+    for (auto CodeBufferIt = CodeBuffers.begin(); CodeBufferIt != CodeBuffers.end();) {
+      if (CodeBufferIt->expired()) {
+        CodeBufferIt = CodeBuffers.erase(CodeBufferIt);
+        FEXTracyPlot("CodeBufferCount", static_cast<int64_t>(CodeBuffers.size()));
+      } else {
+        ++CodeBufferIt;
+      }
+    }
+
 #ifdef ENABLE_FEXCORE_PROFILER
-//    FEXTracyPlot("CodeBufferCount", static_cast<int64_t>(CodeBuffers.size()));
+    FEXTracyPlot("CodeBufferCount", static_cast<int64_t>(CodeBuffers.size()));
 #endif
-//    LogMan::Msg::IFmt("ALLOCATED CODEBUFFER OF SIZE {:#x}, now at {} in total\n", (int)Size, (int)CodeBuffers.size());
+    LogMan::Msg::IFmt("ALLOCATED CODEBUFFER OF SIZE {:#x}, now at {} in total\n", (int)Size, (int)CodeBuffers.size());
     return Buffer;
   }
 
   fextl::shared_ptr<CodeBuffer> CodeBufferManager::GetCurrentCodeBuffer() {
+    codebuffermutex.AssertIsLocked();
     if (!Latest) {
 #ifdef ENABLE_FEXCORE_PROFILER
       FEXTracyMessageL("Creating first CodeBuffer");
@@ -456,20 +508,26 @@ namespace CPU {
   }
 
   bool CPUBackend::IsAddressInCodeBuffer(uintptr_t Address) const {
-    auto CheckCodeBuffer = [](CodeBuffer& Buffer, uintptr_t Address) {
-      auto start = (uintptr_t)Buffer.Ptr;
-      auto end = start + Buffer.Size;
-      return (Address >= start && Address < end);
-    };
+    return manager.IsAddressInCodeBuffer(Address);
+  }
+  bool CodeBufferManager::IsAddressInCodeBuffer(uintptr_t Address) const {
+    auto lock = codebuffermutex.AcquireLock();
 
-    if (CheckCodeBuffer(*CurrentCodeBuffer, Address)) {
-      return true;
-    }
-    for (auto& Buffer : SignalHandlerCodeBuffers) {
-      if (CheckCodeBuffer(*Buffer, Address)) {
+    for (auto& BufferWeak : CodeBuffers) {
+      auto Buffer = BufferWeak.lock();
+      if (!Buffer) {
+        // TODO: Remove Buffer from CodeBuffers
+        continue;
+      }
+
+      auto start = (uintptr_t)Buffer->Ptr;
+      auto end = start + Buffer->Size;
+
+      if (Address >= start && Address < end) {
         return true;
       }
     }
+
     return false;
   }
 

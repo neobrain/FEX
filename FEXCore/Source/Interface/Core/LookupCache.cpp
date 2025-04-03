@@ -19,9 +19,11 @@ GuestToHostMap::GuestToHostMap()
   BlockLinks_pma = fextl::make_unique<std::pmr::polymorphic_allocator<std::byte>>(&BlockLinks_mbr);
   // Setup our PMR map.
   BlockLinks = BlockLinks_pma->new_object<BlockLinksMapType>();
+  // fmt::print(stderr, "Creating SharedLookupCache {}\n", fmt::ptr(this));
 }
 
 GuestToHostMap::~GuestToHostMap() {
+  // fmt::print(stderr, "Deleting SharedLookupCache {}\n", fmt::ptr(this));
 }
 LookupCache::LookupCache(FEXCore::Context::ContextImpl* CTX)
   : ctx {CTX} {

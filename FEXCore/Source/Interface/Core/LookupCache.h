@@ -60,12 +60,29 @@ struct GuestToHostMap {
   GuestToHostMap();
   ~GuestToHostMap();
 
+  // Appends Block {Address} to CodePages [Start, Start + Length)
+  // Returns true if new pages are marked as containing code
+  // TODO: May need to be thread-specific after all
+  // bool AddBlockExecutableRange(uint64_t Address, uint64_t Start, uint64_t Length) {
+  //   bool rv = false;
+
+  //   for (auto CurrentPage = Start >> 12, EndPage = (Start + Length - 1) >> 12; CurrentPage <= EndPage; CurrentPage++) {
+  //     auto& CodePage = CodePages[CurrentPage];
+  //     rv |= CodePage.empty();
+  //     CodePage.push_back(Address);
+  //   }
+
+  //   return rv;
+  // }
+
   // Adds to Guest -> Host code mapping
   void AddBlockMapping(uint64_t Address, void* HostCode, const LockToken&) {
-    [[maybe_unused]] auto Inserted = BlockList.emplace(Address, (uintptr_t)HostCode).second;
+    [[maybe_unused]]
+    auto Inserted = BlockList.emplace(Address, (uintptr_t)HostCode).second;
     // NOTE: If this was inserted twice, we've probably raced against another thread to compile this block. Just ignore this one
     // TODO: Should reset CodeBuffer cursor in that case...
 
+    // TODO: Should this fail?
     // LOGMAN_THROW_A_FMT(Inserted, "Duplicate block mapping added");
   }
 
@@ -108,9 +125,7 @@ public:
   LookupCache(FEXCore::Context::ContextImpl* CTX);
   ~LookupCache();
 
-  // Swaps out the underlying GuestToHostMap and clears all associated caches.
-  // This interface requires the previous CodeBuffer to be provided despite not using it. This ensures the shared write lock is still valid.
-  void ChangeGuestToHostMapping([[maybe_unused]] CPU::CodeBuffer& Prev, GuestToHostMap& NewMap) {
+  void ChangeGuestToHostMapping(GuestToHostMap& NewMap) {
     ClearThreadLocalCaches();
     Shared = &NewMap;
   }
@@ -155,6 +170,7 @@ public:
     return 0;
   }
 
+  // TODO: Consider making this std::atomic
   GuestToHostMap* Shared = nullptr;
 
   fextl::map<uint64_t, fextl::vector<uint64_t>> CodePages;
@@ -162,7 +178,9 @@ public:
   // Appends Block {Address} to CodePages [Start, Start + Length)
   // Returns true if new pages are marked as containing code
   bool AddBlockExecutableRange(uint64_t Address, uint64_t Start, uint64_t Length) {
+    // TODO: Move WriteLock to SharedLookupCache
     auto lk = Shared->AcquireLock();
+    // return Shared->AddBlockExecutableRange(Address, Start, Length);
     bool rv = false;
 
     for (auto CurrentPage = Start >> 12, EndPage = (Start + Length - 1) >> 12; CurrentPage <= EndPage; CurrentPage++) {
@@ -253,6 +271,8 @@ public:
   // Some care is taken so that L1 lookups can be done without locks, and even tearing is unlikely to lead to a crash.
   // This approach has not been fully vetted yet.
   // Also note that L1 lookups might be inlined in the JIT Dispatcher and/or block ends.
+  // TODO: Split into separate mutexes for SharedLookupCache and L1+L2 caches
+  // std::recursive_mutex& WriteLock = Shared->WriteLock;
   auto AcquireLock() {
     return Shared->AcquireLock();
   }

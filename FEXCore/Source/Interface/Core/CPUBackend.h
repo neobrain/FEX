@@ -116,12 +116,14 @@ namespace CPU {
     // TODO: Only for profiling
     size_t UsedSize = 0;
 
+    std::shared_ptr<CodeBuffer> next;
+
     fextl::unique_ptr<GuestToHostMap> LookupCache;
 
     CodeBuffer(size_t Size);
     CodeBuffer(const CodeBuffer&) = delete;
     CodeBuffer& operator=(const CodeBuffer&) = delete;
-    CodeBuffer(CodeBuffer&& oth) = delete;
+    CodeBuffer(CodeBuffer&& oth);
     CodeBuffer& operator=(CodeBuffer&&) = delete;
 
     ~CodeBuffer();
@@ -135,13 +137,16 @@ namespace CPU {
       return GetCurrentCodeBuffer()->Size;
     }
 
+    // TODO: Consider making const?
     std::shared_ptr<CodeBuffer> GetCurrentCodeBuffer();
 
+    bool IsAddressInCodeBuffer(uintptr_t Address) const;
+
+    // TODO: Turn back into fextl::vector
+    // TODO: Do we need fextl::weak_ptr?
+    fextl::vector<std::weak_ptr<CodeBuffer>> CodeBuffers;
     std::shared_ptr<CodeBuffer> Latest;
     std::size_t LatestOffset;
-
-    // Protects writes to the latest CodeBuffer
-    FEXCore::ForkableUniqueMutex CodeBufferWriteMutex;
   };
 
   class CPUBackend {
@@ -253,12 +258,11 @@ namespace CPU {
      */
     virtual void ClearRelocations() {}
 
+    // TODO: Remove. Just a wrapper around CodeBufferManager now
     bool IsAddressInCodeBuffer(uintptr_t Address) const;
 
-    // Updates the CodeBuffer if needed and returns a reference to the old one.
-    // The return reference should be kept alive carefully to avoid early deletion of resources.
-    [[nodiscard]]
-    fextl::shared_ptr<CodeBuffer> CheckCodeBufferUpdate();
+    // Returns true if the CodeBuffer changed
+    bool CheckCodeBufferUpdate();
 
     // TODO: Revisit this interface. For now, it just moves the cursor by the given number of bytes
     virtual void ImportCode(uint64_t NumBytes) {};
@@ -277,6 +281,7 @@ namespace CPU {
 
     // This is the current code buffer that we are tracking
     // TODO: Drop in favor of a plain uint32_t to track the current code buffer *size*
+    // CodeBuffer* CurrentCodeBuffer {};
     std::shared_ptr<CodeBuffer> CurrentCodeBuffer;
 
     // Old CodeBuffer generations required to be valid until returning from signal handlers

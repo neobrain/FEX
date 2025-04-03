@@ -183,7 +183,7 @@ public:
   ConfigureAOTGen(FEXCore::Core::InternalThreadState* Thread, fextl::set<uint64_t>* ExternalBranches, uint64_t SectionMaxAddress) = 0;
 
   /**
-   * @brief Checks if a PC is inside any code buffer used by the thread's JIT.
+   * @brief Checks if a PC is inside of a thread's JIT code buffer.
    *
    * @param Thread Which thread's code buffers to check inside of.
    * @param Address The PC to check against.

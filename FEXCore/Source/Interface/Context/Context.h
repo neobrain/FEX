@@ -290,7 +290,6 @@ public:
     fextl::unique_ptr<FEXCore::Core::DebugData> DebugData;
     uint64_t StartAddr;
     uint64_t Length;
-    std::unique_lock<ForkableUniqueMutex> CodeBufferLock;
   };
   [[nodiscard]]
   CompileCodeResult CompileCode(FEXCore::Core::InternalThreadState* Thread, uint64_t GuestRIP, uint64_t MaxInst = 0);
