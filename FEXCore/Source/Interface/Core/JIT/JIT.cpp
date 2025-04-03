@@ -38,17 +38,9 @@ $end_info$
 #include <string.h>
 #include <limits>
 
-namespace FEXCore::CPU {
-extern std::atomic<uint64_t> TotalCodeBufferSize;
-extern std::atomic<uint64_t> TotalCodeBufferSizeUsed;
-
-extern mymutex codebuffermutex;
-} // namespace FEXCore::CPU
-
-// static constexpr size_t INITIAL_CODE_SIZE = 1024 * 1024 * 16;
-static constexpr size_t INITIAL_CODE_SIZE = 1024 * 1024 * 2280ll;
+static constexpr size_t INITIAL_CODE_SIZE = 1024 * 1024 * 16;
 // We don't want to move above 128MB atm because that means we will have to encode longer jumps
-static constexpr size_t MAX_CODE_SIZE = 1024 * 1024 * 2280ll;
+static constexpr size_t MAX_CODE_SIZE = 1024 * 1024 * 128;
 
 namespace {
 static uint64_t LUDIV(uint64_t SrcHigh, uint64_t SrcLow, uint64_t Divisor) {
@@ -542,9 +534,6 @@ static uint64_t Arm64JITCore_ExitFunctionLink(FEXCore::Core::CpuStateFrame* Fram
 
 void Arm64JITCore::Op_NoOp(const IR::IROp_Header* IROp, IR::NodeID Node) {}
 
-// std::mutex allthesinglemutexes;
-auto& allthesinglemutexes = codebuffermutex;
-
 Arm64JITCore::Arm64JITCore(FEXCore::Context::ContextImpl* ctx, FEXCore::Core::InternalThreadState* Thread)
   : CPUBackend(*ctx, Thread, INITIAL_CODE_SIZE, MAX_CODE_SIZE)
   , Arm64Emitter(ctx)
@@ -604,20 +593,7 @@ Arm64JITCore::Arm64JITCore(FEXCore::Context::ContextImpl* ctx, FEXCore::Core::In
   }
 
   // Must be done after Dispatcher init
-  {
-    auto lock = allthesinglemutexes.AcquireLock();
-    // ClearCache();
-    // // Skip detection string
-    // manager.LatestOffset = GetCursorOffset();
-
-    CurrentCodeBuffer = manager.GetCurrentCodeBuffer();
-    SetBuffer(CurrentCodeBuffer->Ptr, CurrentCodeBuffer->Size);
-    SetCursorOffset(manager.LatestOffset);
-    // TODO: Emit detection string
-    // EmitDetectionString();
-    // manager.LatestOffset = GetCursorOffset();
-    // fmt::print(stderr, "Created thread with CodeBuffer offset {:#x}\n", manager.LatestOffset);
-  }
+  ClearCache();
 
   // Setup dynamic dispatch.
   if (ParanoidTSO()) {
@@ -694,15 +670,9 @@ bool Arm64JITCore::IsGPR(IR::NodeID Node) const {
   return Class == IR::GPRClass || Class == IR::GPRFixedClass;
 }
 
-std::atomic<uint64_t> TheOff {0};
-
 CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, const FEXCore::IR::IRListView* IR, FEXCore::Core::DebugData* DebugData,
                                                    const FEXCore::IR::RegisterAllocationData* RAData) {
   FEXCORE_PROFILE_SCOPED("Arm64::CompileCode");
-
-  // TODO: Moved to CompileBlock for now
-  // auto lock = allthesinglemutexes.AcquireLock();
-  allthesinglemutexes.AssertIsLocked();
 
   JumpTargets.clear();
   uint32_t SSACount = IR->GetSSACount();
@@ -714,64 +684,9 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, const FEXCore
 
   // Fairly excessive buffer range to make sure we don't overflow
   uint32_t BufferRange = SSACount * 16;
-  if (!CurrentCodeBuffer) {
-    ERROR_AND_DIE_FMT("No active code buffer?");
-  }
-  auto makeonexit = []<typename F>(F&& f) {
-    struct OnReturn {
-      F f;
-      ~OnReturn() {
-        std::forward<F>(f)();
-      }
-    };
-    return OnReturn {std::forward<F>(f)};
-  };
-  auto _ = makeonexit([&]() {
-    manager.LatestOffset = GetCursorOffset();
-    TheOff = manager.LatestOffset;
-  });
-
-  // fmt::print(stderr, "CompileCode: buffer {} thread {}.{}\n", fmt::ptr(CurrentCodeBuffer.get()), ::getpid(), ::gettid());
-
-  auto XYZ = CurrentCodeBuffer; // TODO: Needed to keep the SharedLookupCache's allocator alive...
-  if (CurrentCodeBuffer->LookupCache.get() != ThreadState->LookupCache->Shared) {
-    fmt::print(stderr, "INVARIANT VIOLATED: SharedLookupCache doesn't match up!\n");
-    ERROR_AND_DIE_FMT("no way");
-  }
-  if (CheckCodeBufferUpdate()) {
-    ThreadState->LookupCache->ClearThreadLocalCaches();
-    ThreadState->LookupCache->Shared = CurrentCodeBuffer->LookupCache.get();
-    ThreadState->LookupCache->WriteLock = ThreadState->LookupCache->Shared->WriteLock;
-  }
-  XYZ.reset();
-
-  auto TheOffVal = TheOff.load();
-  auto themanageroffset = manager.LatestOffset;
-  if (TheOffVal != 0 && TheOffVal != themanageroffset) {
-    ERROR_AND_DIE_FMT("INCONSISTENT CODEBUFFER OFFSET: {:#x} vs {:#x}\n", TheOffVal, themanageroffset);
-  }
-
-  if (GetCursorOffset() != manager.LatestOffset || GetBufferBase() != CurrentCodeBuffer->Ptr) {
-    SetBuffer(CurrentCodeBuffer->Ptr, CurrentCodeBuffer->Size);
-    SetCursorOffset(manager.LatestOffset);
-  }
-
   if ((GetCursorOffset() + BufferRange) > CurrentCodeBuffer->Size) {
-    if (CurrentCodeBuffer->LookupCache.get() != ThreadState->LookupCache->Shared) {
-      fmt::print(stderr, "INVARIANT VIOLATED: SharedLookupCache doesn't match up!\n");
-      ERROR_AND_DIE_FMT("no way");
-    }
     CTX->ClearCodeCache(ThreadState);
-    if (CurrentCodeBuffer->LookupCache.get() != ThreadState->LookupCache->Shared) {
-      fmt::print(stderr, "INVARIANT VIOLATED: SharedLookupCache doesn't match up!\n");
-      ERROR_AND_DIE_FMT("no way");
-    }
   }
-
-  // Refetch CodeBuffer in case it changed
-  // TODO: If we just allocated a buffer, this will overwrite the detection string...
-  // SetBuffer(CurrentCodeBuffer->Ptr, CurrentCodeBuffer->Size);
-  // SetCursorOffset(manager.LatestOffset);
 
   CodeData.BlockBegin = GetCursorAddress<uint8_t*>();
 

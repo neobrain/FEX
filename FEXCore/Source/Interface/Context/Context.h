@@ -164,7 +164,7 @@ public:
     IRCaptureCache.WriteFilesWithCode(Writer);
   }
 
-  void ClearCodeCache(FEXCore::Core::InternalThreadState* Thread, bool NewCodeBuffer = true) override;
+  void ClearCodeCache(FEXCore::Core::InternalThreadState* Thread) override;
   void InvalidateGuestCodeRange(FEXCore::Core::InternalThreadState* Thread, uint64_t Start, uint64_t Length) override;
   void InvalidateGuestCodeRange(FEXCore::Core::InternalThreadState* Thread, uint64_t Start, uint64_t Length, CodeRangeInvalidationFn callback) override;
   FEXCore::ForkableSharedMutex& GetCodeInvalidationMutex() override {
@@ -249,6 +249,8 @@ public:
   ~ContextImpl();
 
   static void ThreadRemoveCodeEntry(FEXCore::Core::InternalThreadState* Thread, uint64_t GuestRIP);
+  static void ThreadAddBlockLink(FEXCore::Core::InternalThreadState* Thread, uint64_t GuestDestination,
+                                 FEXCore::Context::ExitFunctionLinkData* HostLink, const BlockDelinkerFunc& delinker);
 
   template<auto Fn>
   static uint64_t ThreadExitFunctionLink(FEXCore::Core::CpuStateFrame* Frame, ExitFunctionLinkData* Record) {
@@ -358,6 +360,8 @@ private:
    * InitializeCompiler is called inside of CreateThread, so you likely don't need this
    */
   void InitializeCompiler(FEXCore::Core::InternalThreadState* Thread);
+
+  void AddBlockMapping(FEXCore::Core::InternalThreadState* Thread, uint64_t Address, void* Ptr);
 
   IR::AOTIRCaptureCache IRCaptureCache;
   fextl::unique_ptr<FEXCore::CodeSerialize::CodeObjectSerializeService> CodeObjectCacheService;

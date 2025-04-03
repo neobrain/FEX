@@ -9,81 +9,11 @@ $end_info$
 #pragma once
 
 #include <FEXCore/Utils/CompilerDefs.h>
-#include <FEXCore/fextl/list.h>
-#include <FEXCore/fextl/memory.h>
 #include <FEXCore/fextl/string.h>
 #include <FEXCore/fextl/vector.h>
 
 #include <cstdint>
 #include <memory>
-#include <mutex>
-#include <atomic>
-
-
-#include <FEXCore/Utils/SignalScopeGuards.h>
-
-// struct mymutex : private std::timed_mutex {
-//   auto AcquireLock() {
-//     std::unique_lock<mymutex> lock(*this, std::chrono::seconds {1});
-//     if (!lock) {
-//       fmt::print(stderr, "DEADLOCK\n");
-//       ERROR_AND_DIE_FMT("DEADLOCK\n");
-//     }
-//     return lock;
-//   }
-
-//   void AssertIsLocked() {
-//     if (!IsLocked) {
-//       fmt::print(stderr, "NOT LOCKED\n");
-//       ERROR_AND_DIE_FMT("NOT LOCKED\n");
-//     }
-//   }
-
-//   std::atomic<bool> IsLocked = false;
-//   void lock() {
-//     std::timed_mutex::lock();
-//     IsLocked = true;
-//     // fmt::print(stderr, "LOCKING\n");
-//   }
-//   bool try_lock() {
-//     bool ret = std::timed_mutex::try_lock();
-//     if (ret) {
-//       IsLocked = true;
-//     }
-//     return ret;
-//     // fmt::print(stderr, "LOCKING\n");
-//   }
-//   template< class Rep, class Period >
-//   bool try_lock_for(const std::chrono::duration<Rep, Period>& timeout_duration) {
-//     bool ret = std::timed_mutex::try_lock_for(timeout_duration);
-//     if (ret) {
-//       IsLocked = true;
-//     }
-//     return ret;
-//   }
-//   template< class Clock, class Duration >
-//   bool try_lock_until(const std::chrono::time_point<Clock, Duration>& timeout_time) {
-//     bool ret = std::timed_mutex::try_lock_until(timeout_time);
-//     if (ret) {
-//       IsLocked = true;
-//     }
-//     return ret;
-//   }
-//   void unlock() {
-//     // fmt::print(stderr, "UNLOCKING\n");
-//     IsLocked = false;
-//     std::timed_mutex::unlock();
-//   }
-// };
-
-struct mymutex : public FEXCore::ForkableUniqueMutex {
-  auto AcquireLock() {
-    return std::unique_lock<FEXCore::ForkableUniqueMutex> {*this};
-  }
-
-  void AssertIsLocked() {}
-};
-
 
 namespace FEXCore::CPU {
 union Relocation;
@@ -107,46 +37,24 @@ namespace CodeSerialize {
   struct CodeObjectFileSection;
 }
 
-struct SharedLookupCache;
-
 namespace CPU {
   struct CodeBuffer {
     uint8_t* Ptr;
     size_t Size;
-    // TODO: Only for profiling
-    size_t UsedSize = 0;
-
-    std::shared_ptr<CodeBuffer> next;
-
-    fextl::unique_ptr<SharedLookupCache> LookupCache;
-
-    CodeBuffer(size_t Size);
-    CodeBuffer(const CodeBuffer&) = delete;
-    CodeBuffer& operator=(const CodeBuffer&) = delete;
-    CodeBuffer(CodeBuffer&& oth);
-    CodeBuffer& operator=(CodeBuffer&&) = delete;
-
-    ~CodeBuffer();
   };
 
   class CodeBufferManager {
   public:
-    fextl::shared_ptr<CodeBuffer> AllocateNewCodeBuffer(size_t Size);
-
-    size_t GetCurrentCodeBufferSize() {
-      return GetCurrentCodeBuffer()->Size;
+    static CodeBuffer AllocateNewCodeBuffer(size_t Size);
+    void EmplaceNewCodeBuffer(CodeBuffer Buffer) {
+      CodeBuffers.emplace_back(Buffer);
     }
 
-    // TODO: Consider making const?
-    std::shared_ptr<CodeBuffer> GetCurrentCodeBuffer();
+    void ReleaseCodeBuffer(CodeBuffer Buffer);
 
     bool IsAddressInCodeBuffer(uintptr_t Address) const;
 
-    // TODO: Turn back into fextl::vector
-    // TODO: Do we need fextl::weak_ptr?
-    fextl::vector<std::weak_ptr<CodeBuffer>> CodeBuffers;
-    std::shared_ptr<CodeBuffer> Latest;
-    std::size_t LatestOffset;
+    fextl::vector<CodeBuffer> CodeBuffers {};
   };
 
   class CPUBackend {
@@ -260,11 +168,7 @@ namespace CPU {
     // TODO: Remove. Just a wrapper around CodeBufferManager now
     bool IsAddressInCodeBuffer(uintptr_t Address) const;
 
-    // Returns true if the CodeBuffer changed
-    bool CheckCodeBufferUpdate();
-
   protected:
-  public:
     // Max spill slot size in bytes. We need at most 32 bytes
     // to be able to handle a 256-bit vector store to a slot.
     constexpr static uint32_t MaxSpillSlotSize = 32;
@@ -277,13 +181,19 @@ namespace CPU {
 
     // This is the current code buffer that we are tracking
     // TODO: Drop in favor of a plain uint32_t to track the current code buffer *size*
-    // CodeBuffer* CurrentCodeBuffer {};
-    std::shared_ptr<CodeBuffer> CurrentCodeBuffer;
-
-    // Old CodeBuffer generations required to be valid until returning from signal handlers
-    fextl::vector<std::shared_ptr<CodeBuffer>> SignalHandlerCodeBuffers;
+    CodeBuffer* CurrentCodeBuffer {};
 
     CodeBufferManager& manager; // TODO: Rename
+
+  private:
+    void EmplaceNewCodeBuffer(CodeBuffer Buffer) {
+      manager.EmplaceNewCodeBuffer(Buffer);
+      CurrentCodeBuffer = &CodeBuffers.emplace_back(Buffer);
+    }
+
+    // This is the array of code buffers. Unless signals force us to keep more than
+    // buffer, there will be only one entry here
+    fextl::vector<CodeBuffer> CodeBuffers {};
   };
 
 } // namespace CPU

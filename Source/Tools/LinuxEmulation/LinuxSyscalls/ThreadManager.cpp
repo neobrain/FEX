@@ -12,8 +12,6 @@
 #include <fcntl.h>
 #include <git_version.h>
 
-void DebugDebug(FEXCore::CPU::CPUBackend&);
-
 namespace FEX::HLE {
 
 ThreadManager::StatAlloc::StatAlloc() {
@@ -182,11 +180,6 @@ FEX::HLE::ThreadStateObject* ThreadManager::CreateThread(uint64_t InitialRIP, ui
 void ThreadManager::DestroyThread(FEX::HLE::ThreadStateObject* Thread, bool NeedsTLSUninstall) {
   {
     std::lock_guard lk(ThreadCreationMutex);
-    fmt::print(stderr, "Closing thread, {} remaining\n", Threads.size());
-    for (auto& T : Threads) {
-      DebugDebug(*T->Thread->CPUBackend);
-    }
-    fmt::print(stderr, "\n");
     auto It = std::find(Threads.begin(), Threads.end(), Thread);
     LOGMAN_THROW_A_FMT(It != Threads.end(), "Thread wasn't in Threads");
     Threads.erase(It);

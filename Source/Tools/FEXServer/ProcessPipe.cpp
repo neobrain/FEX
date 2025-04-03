@@ -391,7 +391,81 @@ void WaitForRequests() {
   Reactor.enable_async_stop();
   Reactor.run(Foreground ? std::nullopt : std::optional {std::chrono::seconds {RequestTimeout}});
 
-  LogMan::Msg::DFmt("[FEXServer] Shutting Down");
+  while (!ShouldShutdown) {
+    struct timespec ts {};
+    ts.tv_sec = RequestTimeout;
+
+    int Result = ppoll(&PollFDs.at(0), PollFDs.size(), &ts, nullptr);
+    std::vector<struct pollfd> NewPollFDs {};
+
+    if (Result > 0) {
+      // Walk the FDs and see if we got any results
+      for (auto it = PollFDs.begin(); it != PollFDs.end();) {
+        auto& Event = *it;
+        bool Erase {};
+
+        if (Event.revents != 0) {
+          if (Event.fd == ServerSocketFD || Event.fd == ServerFSSocketFD) {
+            if (Event.revents & POLLIN) {
+              // If it is the listen socket then we have a new connection
+              struct sockaddr_storage Addr {};
+              socklen_t AddrSize {};
+              int NewFD = accept(Event.fd, reinterpret_cast<struct sockaddr*>(&Addr), &AddrSize);
+
+              // Add the new client to the temporary array
+              NewPollFDs.emplace_back(pollfd {
+                .fd = NewFD,
+                .events = POLLIN | POLLPRI | POLLRDHUP,
+                .revents = 0,
+              });
+            } else if (Event.revents & (POLLHUP | POLLERR | POLLNVAL)) {
+              // Listen socket error or shutting down
+              break;
+            }
+          } else {
+            if (Event.revents & POLLIN) {
+              // Data from the socket
+              HandleSocketData(Event.fd);
+            }
+
+            if (Event.revents & (POLLHUP | POLLERR | POLLNVAL | POLLRDHUP)) {
+              // Error or hangup, close the socket and erase it from our list
+              Erase = true;
+              close(Event.fd);
+            }
+          }
+
+          Event.revents = 0;
+          --Result;
+        }
+
+        if (Erase) {
+          it = PollFDs.erase(it);
+        } else {
+          ++it;
+        }
+
+        if (Result == 0) {
+          // Early break if we've consumed all the results
+          break;
+        }
+      }
+
+      // Insert the new FDs to poll
+      PollFDs.insert(PollFDs.begin(), NewPollFDs.begin(), NewPollFDs.end());
+
+      LastDataTime = std::chrono::system_clock::now();
+    } else {
+      auto Now = std::chrono::system_clock::now();
+      auto Diff = Now - LastDataTime;
+      if (Diff >= std::chrono::seconds(RequestTimeout) && !Foreground && PollFDs.size() == 1) {
+        // If we aren't running in the foreground and we have no connections after a timeout
+        // Then we can just go ahead and leave
+        ShouldShutdown = true;
+        LogMan::Msg::DFmt("[FEXServer] Shutting Down");
+      }
+    }
+  }
 
   CloseConnections();
 }

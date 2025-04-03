@@ -73,14 +73,6 @@ $end_info$
 #include <utility>
 #include <xxhash.h>
 
-extern "C" {
-extern int CodeDumpFD;
-}
-
-namespace FEXCore::CPU {
-extern mymutex codebuffermutex;
-}
-
 namespace FEXCore::Context {
 ContextImpl::ContextImpl(const FEXCore::HostFeatures& Features)
   : HostFeatures {Features}
@@ -113,7 +105,6 @@ ContextImpl::ContextImpl(const FEXCore::HostFeatures& Features)
 }
 
 ContextImpl::~ContextImpl() {
-  // fmt::print(stderr, "~ContextImpl!\n");
   {
     if (CodeObjectCacheService) {
       CodeObjectCacheService->Shutdown();
@@ -406,8 +397,6 @@ void ContextImpl::InitializeCompiler(FEXCore::Core::InternalThreadState* Thread)
   // Create CPU backend
   Thread->PassManager->InsertRegisterAllocationPass();
   Thread->CPUBackend = FEXCore::CPU::CreateArm64JITCore(this, Thread);
-  Thread->LookupCache->Shared = Thread->CPUBackend->CurrentCodeBuffer->LookupCache.get();
-  Thread->LookupCache->WriteLock = Thread->LookupCache->Shared->WriteLock;
 
   Thread->PassManager->Finalize();
 }
@@ -470,6 +459,7 @@ void ContextImpl::UnlockAfterFork(FEXCore::Core::InternalThreadState* LiveThread
     return;
   }
 }
+
 void ContextImpl::LockBeforeFork(FEXCore::Core::InternalThreadState* Thread) {
   CodeInvalidationMutex.lock();
   Allocator::LockBeforeFork(Thread);
@@ -479,7 +469,11 @@ void ContextImpl::LockBeforeFork(FEXCore::Core::InternalThreadState* Thread) {
 }
 #endif
 
-void ContextImpl::ClearCodeCache(FEXCore::Core::InternalThreadState* Thread, bool NewCodeBuffer) {
+void ContextImpl::AddBlockMapping(FEXCore::Core::InternalThreadState* Thread, uint64_t Address, void* Ptr) {
+  Thread->LookupCache->AddBlockMapping(Address, Ptr);
+}
+
+void ContextImpl::ClearCodeCache(FEXCore::Core::InternalThreadState* Thread) {
   FEXCORE_PROFILE_INSTANT("ClearCodeCache");
 
   if (CodeObjectCacheService) {
@@ -487,21 +481,10 @@ void ContextImpl::ClearCodeCache(FEXCore::Core::InternalThreadState* Thread, boo
     // Use the thread's object cache ref counter for this
     CodeSerialize::CodeObjectSerializeService::WaitForEmptyJobQueue(&Thread->ObjectCacheRefCounter);
   }
+  std::lock_guard<std::recursive_mutex> lk(Thread->LookupCache->WriteLock);
 
-  if (NewCodeBuffer) {
-    // NOTE: Holding on to the reference here is required to ensure validity of the WriteLock mutex
-    std::shared_ptr CurrentCodeBuffer = Thread->CPUBackend->CurrentCodeBuffer;
-    std::lock_guard<std::recursive_mutex> lk(CurrentCodeBuffer->LookupCache->WriteLock);
-
-    // Allocate new CodeBuffer + L3 LookupCache, then clear L1+L2 caches
-    Thread->CPUBackend->ClearCache();
-    Thread->LookupCache->Shared = Thread->CPUBackend->CurrentCodeBuffer->LookupCache.get();
-    Thread->LookupCache->WriteLock = Thread->LookupCache->Shared->WriteLock;
-    Thread->LookupCache->ClearThreadLocalCaches();
-  } else {
-    // Clear L1+L2 cache of this thread, and clear L3 cache across any threads using it
-    Thread->LookupCache->ClearCache();
-  }
+  Thread->LookupCache->ClearCache();
+  Thread->CPUBackend->ClearCache();
 }
 
 static void IRDumper(FEXCore::Core::InternalThreadState* Thread, IR::IREmitter* IREmitter, uint64_t GuestRIP, IR::RegisterAllocationData* RA) {
@@ -836,17 +819,11 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
   FEXCORE_PROFILE_SCOPED("CompileBlock");
   FEXCORE_PROFILE_ACCUMULATION(Thread, AccumulatedJITTime);
 
-  // TODO: This won't work if the code buffer generation gets updated...
-  // auto xyz = Thread->CPUBackend->CurrentCodeBuffer;
-  // auto lock2 = std::unique_lock {xyz->LookupCache->WriteLock};
-
   // Invalidate might take a unique lock on this, to guarantee that during invalidation no code gets compiled
   auto lk = GuardSignalDeferringSection<std::shared_lock>(CodeInvalidationMutex, Thread);
 
   // Is the code in the cache?
   // The backends only check L1 and L2, not L3
-  auto lock = CPU::codebuffermutex.AcquireLock();
-
   if (auto HostCode = Thread->LookupCache->FindBlock(GuestRIP)) {
     return HostCode;
   }
@@ -909,7 +886,7 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
 
   // Insert to lookup cache
   // Pages containing this block are added via AddBlockExecutableRange before each page gets accessed in the frontend
-  Thread->LookupCache->AddBlockMapping(GuestRIP, CodePtr);
+  AddBlockMapping(Thread, GuestRIP, CodePtr);
 
   return (uintptr_t)CodePtr;
 }
@@ -917,8 +894,6 @@ uintptr_t ContextImpl::CompileBlock(FEXCore::Core::CpuStateFrame* Frame, uint64_
 static void InvalidateGuestThreadCodeRange(FEXCore::Core::InternalThreadState* Thread, uint64_t Start, uint64_t Length) {
   std::lock_guard<std::recursive_mutex> lk(Thread->LookupCache->WriteLock);
 
-  // auto lower = Thread->LookupCache->Shared->CodePages.lower_bound(Start >> 12);
-  // auto upper = Thread->LookupCache->Shared->CodePages.upper_bound((Start + Length - 1) >> 12);
   auto lower = Thread->LookupCache->CodePages.lower_bound(Start >> 12);
   auto upper = Thread->LookupCache->CodePages.upper_bound((Start + Length - 1) >> 12);
 
@@ -957,9 +932,18 @@ void ContextImpl::MarkMemoryShared(FEXCore::Core::InternalThreadState* Thread) {
   }
 }
 
+void ContextImpl::ThreadAddBlockLink(FEXCore::Core::InternalThreadState* Thread, uint64_t GuestDestination,
+                                     FEXCore::Context::ExitFunctionLinkData* HostLink, const FEXCore::Context::BlockDelinkerFunc& delinker) {
+  auto lk = GuardSignalDeferringSection<std::shared_lock>(static_cast<ContextImpl*>(Thread->CTX)->CodeInvalidationMutex, Thread);
+
+  Thread->LookupCache->AddBlockLink(GuestDestination, HostLink, delinker);
+}
+
 void ContextImpl::ThreadRemoveCodeEntry(FEXCore::Core::InternalThreadState* Thread, uint64_t GuestRIP) {
   LogMan::Throw::AFmt(static_cast<ContextImpl*>(Thread->CTX)->CodeInvalidationMutex.try_lock() == false, "CodeInvalidationMutex needs to "
                                                                                                          "be unique_locked here");
+
+  std::lock_guard<std::recursive_mutex> lk(Thread->LookupCache->WriteLock);
 
   Thread->LookupCache->Erase(Thread->CurrentFrame, GuestRIP);
 }
