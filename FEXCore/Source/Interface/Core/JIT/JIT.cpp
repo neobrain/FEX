@@ -43,10 +43,9 @@ namespace FEXCore::CPU {
 extern mymutex codebuffermutex;
 }
 
-// static constexpr size_t INITIAL_CODE_SIZE = 1024 * 1024 * 16;
-static constexpr size_t INITIAL_CODE_SIZE = 1024 * 1024 * 2280ll;
+static constexpr size_t INITIAL_CODE_SIZE = 1024 * 1024 * 16;
 // We don't want to move above 128MB atm because that means we will have to encode longer jumps
-static constexpr size_t MAX_CODE_SIZE = 1024 * 1024 * 2280ll;
+static constexpr size_t MAX_CODE_SIZE = 1024 * 1024 * 128;
 
 namespace {
 static uint64_t LUDIV(uint64_t SrcHigh, uint64_t SrcLow, uint64_t Divisor) {
@@ -608,7 +607,7 @@ Arm64JITCore::Arm64JITCore(FEXCore::Context::ContextImpl* ctx, FEXCore::Core::In
 
   // Must be done after Dispatcher init
   {
-    auto lock = allthesinglemutexes.AcquireLock();
+    auto lock = std::unique_lock {manager.CodeBufferWriteMutex};
     // ClearCache();
     // // Skip detection string
     // manager.LatestOffset = GetCursorOffset();
@@ -619,7 +618,6 @@ Arm64JITCore::Arm64JITCore(FEXCore::Context::ContextImpl* ctx, FEXCore::Core::In
     // TODO: Emit detection string
     // EmitDetectionString();
     // manager.LatestOffset = GetCursorOffset();
-    // fmt::print(stderr, "Created thread with CodeBuffer offset {:#x}\n", manager.LatestOffset);
   }
 
   // Setup dynamic dispatch.

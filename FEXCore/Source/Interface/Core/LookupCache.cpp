@@ -14,16 +14,14 @@ $end_info$
 #include "Interface/Core/LookupCache.h"
 
 namespace FEXCore {
-SharedLookupCache::SharedLookupCache()
+GuestToHostMap::GuestToHostMap()
   : BlockLinks_mbr {fextl::pmr::get_default_resource()} {
   BlockLinks_pma = fextl::make_unique<std::pmr::polymorphic_allocator<std::byte>>(&BlockLinks_mbr);
   // Setup our PMR map.
   BlockLinks = BlockLinks_pma->new_object<BlockLinksMapType>();
-  // fmt::print(stderr, "Creating SharedLookupCache {}\n", fmt::ptr(this));
 }
 
-SharedLookupCache::~SharedLookupCache() {
-  // fmt::print(stderr, "Deleting SharedLookupCache {}\n", fmt::ptr(this));
+GuestToHostMap::~GuestToHostMap() {
 }
 LookupCache::LookupCache(FEXCore::Context::ContextImpl* CTX)
   : ctx {CTX} {
@@ -69,7 +67,7 @@ LookupCache::~LookupCache() {
 }
 
 void LookupCache::ClearL2Cache() {
-  std::lock_guard<std::recursive_mutex> lk(WriteLock);
+  auto lk = Shared->AcquireLock();
   // Clear out the page memory
   // PagePointer and PageMemory are sequential with each other. Clear both at once.
   FEXCore::Allocator::VirtualDontNeed(reinterpret_cast<void*>(PagePointer), ctx->Config.VirtualMemSize / 4096 * 8 + CODE_SIZE, false);
@@ -77,22 +75,22 @@ void LookupCache::ClearL2Cache() {
 }
 
 void LookupCache::ClearThreadLocalCaches() {
-  std::lock_guard<std::recursive_mutex> lk(WriteLock);
+  auto lk = Shared->AcquireLock();
 
   // Clear L1 and L2 by clearing the full cache.
   FEXCore::Allocator::VirtualDontNeed(reinterpret_cast<void*>(PagePointer), TotalCacheSize, false);
 }
 
 void LookupCache::ClearCache() {
-  std::lock_guard<std::recursive_mutex> lk(WriteLock);
+  auto lk = Shared->AcquireLock();
 
   // Clear L1 and L2 by clearing the full cache.
   FEXCore::Allocator::VirtualDontNeed(reinterpret_cast<void*>(PagePointer), TotalCacheSize, false);
 
-  Shared->ClearCache();
+  Shared->ClearCache(lk);
 }
 
-void SharedLookupCache::ClearCache() {
+void GuestToHostMap::ClearCache(const LockToken&) {
   // Allocate a new pointer from the BlockLinks pma again.
   BlockLinks = BlockLinks_pma->new_object<BlockLinksMapType>();
   // All code is gone, clear the block list
