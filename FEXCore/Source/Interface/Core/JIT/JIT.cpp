@@ -992,10 +992,11 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
   // CodeSize not including the header or tail data.
   const uint64_t CodeOnlySize = GetCursorAddress<uint8_t*>() - CodeBegin;
 
-  // Add the JitCodeTail
+  // Add the JitCodeTail (initialized to zero to ensure consistency for caching)
   Align(alignof(JITCodeTail));
   const auto JITBlockTailLocation = GetCursorAddress<uint8_t*>();
   const auto JITBlockTail = GetCursorAddress<JITCodeTail*>();
+  memset(JITBlockTail, 0, sizeof(*JITBlockTail));
 
   // Entries that live after the JITCodeTail.
   // These entries correlate JIT code regions with guest RIP regions.
