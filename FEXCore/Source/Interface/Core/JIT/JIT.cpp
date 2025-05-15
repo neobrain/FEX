@@ -1052,7 +1052,7 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
   }
 
   CursorIncrement(JITRIPEntriesLocation - JITRIPEntriesBegin);
-  Align();
+  Align(16); // TODO: Shouldn't need to align to 16 bytes?
 
   CodeHeader->OffsetToBlockTail = JITBlockTailLocation - CodeData.BlockBegin;
 
@@ -1081,7 +1081,8 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
 
       // NOTE: 16-byte alignment of the new cursor offset must be preserved for block linking records
       SetBuffer(CurrentCodeBuffer->Ptr, CurrentCodeBuffer->Size);
-      SetCursorOffset(AlignUp(CodeBuffers.LatestOffset, 16));
+      SetCursorOffset(CodeBuffers.LatestOffset);
+      Align16B();
       if ((GetCursorOffset() + TempSize) > (CurrentCodeBuffer->Size - Utils::FEX_PAGE_SIZE)) {
         CTX->ClearCodeCache(ThreadState);
       }
