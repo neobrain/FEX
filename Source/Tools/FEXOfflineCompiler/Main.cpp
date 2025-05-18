@@ -70,7 +70,6 @@ public:
     auto Ret = mmap(addr, Size, prot, Flags, fd, offset);
     if (Ret != MAP_FAILED && VAFileStart == 0) {
       VAFileStart = reinterpret_cast<uintptr_t>(Ret);
-      fmt::print("Mapped to {:#x}\n", VAFileStart);
     }
     return Ret;
   }
@@ -142,7 +141,7 @@ int CombineCodeMaps(int argc, const char** argv) {
   }
 
   if (!Options.is_set("output")) {
-    fmt::print("{}: error: Output not specified (--output)", argv[0]);
+    fmt::print("{}: error: Output not specified (--output)\n", argv[0]);
     return EXIT_FAILURE;
   }
 
@@ -398,14 +397,44 @@ int GenerateCache(int argc, const char** argv) {
 
   // g_print_ir = true;
   {
-    std::vector<std::unique_ptr<ELFCodeLoader>> LoaderMem;
+    uint64_t Progress = 0;
+    const int NumItems = InitialBranchTargets.size();
 
-    fmt::print(stderr, "Running code discovery...\n");
-    for (auto Addr : InitialBranchTargets) {
-      CTX->CompileRIP(Thread, Addr);
+    std::string TaskName = fmt::format("Compiling {} blocks", NumItems, NumItems);
+
+    winsize TerminalSize;
+    bool PrintProgress = (ioctl(STDOUT_FILENO, TIOCGWINSZ, &TerminalSize) == 0 && TerminalSize.ws_col > 30);
+    if (PrintProgress) {
+      TerminalSize.ws_col -= 5; // Percentage display
+      TerminalSize.ws_col -= TaskName.size() + 1;
+    } else {
+      fmt::println("Compiling {} code blocks...", NumItems);
     }
 
-    fmt::print(stderr, "Compiling code...\n");
+    for (auto Addr : InitialBranchTargets) {
+      CTX->CompileRIP(Thread, Addr);
+      ++Progress;
+      if (!PrintProgress || (Progress % 10 && Progress + 10 < NumItems)) {
+        continue;
+      }
+
+      std::string Bar;
+      for (int i = 0; i < TerminalSize.ws_col * Progress / NumItems; ++i) {
+        Bar += "█";
+      }
+      auto SubIndex = (TerminalSize.ws_col * Progress * 8 / NumItems % 8);
+      const char* BlockCharacters[] = {"", "▏", "▎", "▍", "▌", "▋", "▊", "▉"};
+      Bar += BlockCharacters[SubIndex];
+      // \r: Move to beginning of the line
+      // {:{}}: Move to the end of the line by printing an empty string with padding
+      // {:3}: Reserve 3 characters for percentage number
+      fmt::print("\r{} {}{:{}}{:3}%", TaskName, Bar, "", TerminalSize.ws_col - TerminalSize.ws_col * Progress / NumItems + (SubIndex == 0),
+                 Progress * 100 / NumItems);
+      std::fflush(stdout);
+    }
+    if (PrintProgress) {
+      fmt::print("\n");
+    }
 
     fextl::string OutDir(Options.get("outdir"));
     if (!OutDir.ends_with('/')) {
