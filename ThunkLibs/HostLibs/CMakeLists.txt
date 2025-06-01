@@ -133,7 +133,9 @@ foreach(GUEST_BITNESS IN LISTS BITNESS_LIST)
 
   generate(libwayland-client ${CMAKE_CURRENT_SOURCE_DIR}/../libwayland-client/libwayland-client_interface.cpp ${GUEST_BITNESS})
   add_host_lib(wayland-client ${GUEST_BITNESS})
-  target_include_directories(libwayland-client-${GUEST_BITNESS}-deps INTERFACE /usr/include/wayland)
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(WAYLAND REQUIRED wayland-client)
+  target_include_directories(libwayland-client-${GUEST_BITNESS}-deps INTERFACE ${WAYLAND_INCLUDE_DIRS})
 
   generate(libEGL ${CMAKE_CURRENT_SOURCE_DIR}/../libEGL/libEGL_interface.cpp ${GUEST_BITNESS})
   add_host_lib(EGL ${GUEST_BITNESS})
