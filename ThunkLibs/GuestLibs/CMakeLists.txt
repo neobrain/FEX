@@ -192,8 +192,8 @@ if (BITNESS EQUAL 64)
   add_guest_lib(vulkan "libvulkan.so.1")
 
   generate(libdrm ${CMAKE_CURRENT_SOURCE_DIR}/../libdrm/libdrm_interface.cpp)
-  target_include_directories(libdrm-guest-deps INTERFACE /usr/include/drm/)
-  target_include_directories(libdrm-guest-deps INTERFACE /usr/include/libdrm/)
+  target_include_directories(libdrm-guest-deps INTERFACE ${X86_DEV_ROOTFS}/usr/include/drm/)
+  target_include_directories(libdrm-guest-deps INTERFACE ${X86_DEV_ROOTFS}/usr/include/libdrm/)
   add_guest_lib(drm "libdrm.so.2")
 endif()
 
