@@ -100,6 +100,8 @@ function(add_host_lib NAME GUEST_BITNESS)
   endif()
 endfunction()
 
+find_package(PkgConfig REQUIRED)
+
 set (BITNESS_LIST "64")
 foreach(GUEST_BITNESS IN LISTS BITNESS_LIST)
   #add_host_lib(fex_malloc_symbols ${GUEST_BITNESS})
@@ -109,6 +111,8 @@ foreach(GUEST_BITNESS IN LISTS BITNESS_LIST)
 
   generate(libasound ${CMAKE_CURRENT_SOURCE_DIR}/../libasound/libasound_interface.cpp ${GUEST_BITNESS})
   add_host_lib(asound ${GUEST_BITNESS})
+  pkg_check_modules(ALSA REQUIRED alsa)
+  target_include_directories(libasound-${GUEST_BITNESS}-deps INTERFACE ${ALSA_INCLUDE_DIRS})
 
   # disabled for now, headers are platform specific
   # find_package(SDL2 REQUIRED)
@@ -133,7 +137,6 @@ foreach(GUEST_BITNESS IN LISTS BITNESS_LIST)
 
   generate(libwayland-client ${CMAKE_CURRENT_SOURCE_DIR}/../libwayland-client/libwayland-client_interface.cpp ${GUEST_BITNESS})
   add_host_lib(wayland-client ${GUEST_BITNESS})
-  find_package(PkgConfig REQUIRED)
   pkg_check_modules(WAYLAND REQUIRED wayland-client)
   target_include_directories(libwayland-client-${GUEST_BITNESS}-deps INTERFACE ${WAYLAND_INCLUDE_DIRS})
 
