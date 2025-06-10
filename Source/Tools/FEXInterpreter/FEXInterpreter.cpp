@@ -403,9 +403,15 @@ int main(int argc, char** argv, char** const envp) {
     FEXCore::Config::Set(FEXCore::Config::CONFIG_APP_FILENAME, "<Anonymous>");
     FEXCore::Config::Set(FEXCore::Config::CONFIG_APP_CONFIG_NAME, "<Anonymous>");
   } else {
+    // TODO: Perform proper lookup via PATH?
+
     {
       char ExistsTempPath[PATH_MAX];
       char* RealPath = realpath(Program.ProgramPath.c_str(), ExistsTempPath);
+      fmt::print(stderr, "NAME: realpath {} -> {}\n", Program.ProgramPath, RealPath ? RealPath : "");
+      if (!RealPath && Program.ProgramPath.starts_with('/')) {
+        RealPath = realpath((LDPath() + '/' + Program.ProgramPath).c_str(), ExistsTempPath);
+      }
       if (RealPath) {
         FEXCore::Config::Set(FEXCore::Config::CONFIG_APP_FILENAME, fextl::string(RealPath));
       }
