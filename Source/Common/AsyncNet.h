@@ -126,6 +126,9 @@ private:
       iov[NumIovs].iov_len = Buffer->Data.size_bytes();
       ++NumIovs;
     }
+    if (iov[0].iov_len == 0) {
+      NumIovs = 0;
+    }
     msghdr msg {
       .msg_name = nullptr,
       .msg_namelen = 0,
