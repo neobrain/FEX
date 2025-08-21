@@ -980,12 +980,14 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
     // This is a ExitFunctionLinkData struct
     BindOrRestart(&l_ExitLink);
     dc64(0);                                             // HostCode
-    dc64(PendingJumpThunk.GuestRIP);                     // GuestRIP
+    auto RIPLiteral = InsertGuestRIPLiteral(PendingJumpThunk.GuestRIP);
+    PlaceNamedSymbolLiteral(RIPLiteral);                 // GuestRIP
     dc64(PendingJumpThunk.CallerAddress - ThunkAddress); // CallerOffset
   }
 
   BindOrRestart(&l_ExitLink);
-  dc64(ThreadState->CurrentFrame->Pointers.Common.ExitFunctionLinker);
+  auto LinkerLiteral = InsertNamedSymbolLiteral(RelocNamedSymbolLiteral::NamedSymbol::SYMBOL_LITERAL_EXITFUNCTION_LINKER);
+  PlaceNamedSymbolLiteral(LinkerLiteral);
 
   // CodeSize not including the header or tail data.
   const uint64_t CodeOnlySize = GetCursorAddress<uint8_t*>() - CodeBegin;
