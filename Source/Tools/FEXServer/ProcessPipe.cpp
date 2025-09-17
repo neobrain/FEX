@@ -57,7 +57,6 @@ constexpr int USER_PERMS = S_IRWXU | S_IRWXG | S_IRWXO;
 int ServerLockFD {-1};
 std::optional<fasio::tcp_acceptor> ServerAcceptor;
 std::optional<fasio::tcp_acceptor> ServerFSAcceptor;
-int NumClients = 0;
 time_t RequestTimeout {10};
 bool Foreground {false};
 std::vector<struct pollfd> PollFDs {};
@@ -68,6 +67,13 @@ rlimit MaxFDs {};
 std::atomic<size_t> NumFilesOpened {};
 
 static std::string CodeMapDirectory;
+
+struct ClientData {
+  int PID;
+};
+// Maps connection FD to associated client data
+static std::unordered_map<int, ClientData> Clients;
+static fasio::poll_reactor Reactor;
 
 size_t GetNumFilesOpen() {
   // Walk /proc/self/fd/ to see how many open files we currently have
@@ -215,9 +221,7 @@ bool InitializeServerPipe() {
   return true;
 }
 
-static fasio::poll_reactor Reactor;
-
-void HandleSocketData(fasio::tcp_socket&);
+void HandleSocketData(fasio::tcp_socket&, ClientData&);
 
 bool InitializeServerSocket(bool abstract) {
   fextl::string ServerSocketName;
@@ -246,7 +250,21 @@ bool InitializeServerSocket(bool abstract) {
     }
 
     int FD = Socket->FD;
-    ++NumClients;
+
+    // Client always sends its process ID along with a connection request
+    int ClientPID;
+    fasio::read(*Socket, fasio::mutable_buffer {std::as_writable_bytes(std::span {&ClientPID, 1})}, ec);
+    if (ec != fasio::error::success) {
+      // Reject connection and wait for the next one
+      LogMan::Msg::EFmt("FEXServer expected client PID; rejecting connection (error {}, {})", errno, strerror(errno));
+      close(Socket->FD);
+      return fasio::post_callback::repeat;
+    }
+
+    auto [_, Inserted] = Clients.insert({Socket->FD, ClientData {ClientPID}});
+    LOGMAN_THROW_A_FMT(Inserted, "Duplicate client FD");
+
+    // Start listening for client messages
     Reactor.bind_handler(
       pollfd {
         .fd = FD,
@@ -256,10 +274,10 @@ bool InitializeServerSocket(bool abstract) {
       [Socket = std::move(Socket).value()](fasio::error ec) mutable {
         if (ec != fasio::error::success) {
           close(Socket.FD);
-          --NumClients;
+          Clients.erase(Socket.FD);
           return fasio::post_callback::drop;
         }
-        HandleSocketData(Socket);
+        HandleSocketData(Socket, Clients.at(Socket.FD));
         // Wait for next data
         return fasio::post_callback::repeat;
       });
@@ -318,7 +336,7 @@ static int RunOfflineCompiler(const char* CodeMap) {
   return EmbedSubprocess("FEXOfflineCompiler", const_cast<char* const*>(&ExecveArgs[0]));
 };
 
-void HandleSocketData(fasio::tcp_socket& Socket) {
+void HandleSocketData(fasio::tcp_socket& Socket, ClientData&) {
   std::vector<uint8_t> Data(1500);
 
   // Get the current number of FDs of the process before we start handling sockets.
@@ -705,7 +723,7 @@ void WaitForRequests() {
 
   while (true) {
     std::optional Timeout = std::chrono::seconds {RequestTimeout};
-    if (Foreground || NumClients > 0) {
+    if (Foreground || !Clients.empty()) {
       Timeout.reset();
     }
     auto Result = Reactor.run_one(Timeout);

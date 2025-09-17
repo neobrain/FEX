@@ -184,27 +184,34 @@ int ConnectToServer(ConnectionOption ConnectionOption) {
     if (ConnectionOption == ConnectionOption::Default || errno != ECONNREFUSED) {
       LogMan::Msg::EFmt("Couldn't connect to FEXServer socket {} {}", ServerSocketName, errno);
     }
-  } else {
-    return SocketFD;
-  }
 
-  // Try again with a path-based socket, since abstract sockets will fail if we have been
-  // placed in a new netns as part of a sandbox.
-  auto ServerSocketPath = GetServerSocketPath();
+    // Try again with a path-based socket, since abstract sockets will fail if we have been
+    // placed in a new netns as part of a sandbox.
+    auto ServerSocketPath = GetServerSocketPath();
 
-  SizeOfSocketString = std::min(ServerSocketPath.size(), sizeof(addr.sun_path) - 1);
-  strncpy(addr.sun_path, ServerSocketPath.data(), SizeOfSocketString);
-  SizeOfAddr = sizeof(addr.sun_family) + SizeOfSocketString;
-  if (connect(SocketFD, reinterpret_cast<struct sockaddr*>(&addr), SizeOfAddr) == -1) {
-    if (ConnectionOption == ConnectionOption::Default || (errno != ECONNREFUSED && errno != ENOENT)) {
-      LogMan::Msg::EFmt("Couldn't connect to FEXServer socket {} {}", ServerSocketPath, errno);
+    SizeOfSocketString = std::min(ServerSocketPath.size(), sizeof(addr.sun_path) - 1);
+    strncpy(addr.sun_path, ServerSocketPath.data(), SizeOfSocketString);
+    SizeOfAddr = sizeof(addr.sun_family) + SizeOfSocketString;
+    if (connect(SocketFD, reinterpret_cast<struct sockaddr*>(&addr), SizeOfAddr) == -1) {
+      if (ConnectionOption == ConnectionOption::Default || (errno != ECONNREFUSED && errno != ENOENT)) {
+        LogMan::Msg::EFmt("Couldn't connect to FEXServer socket {} {}", ServerSocketPath, errno);
+      }
+      close(SocketFD);
+      return -1;
     }
-  } else {
-    return SocketFD;
   }
 
-  close(SocketFD);
-  return -1;
+  // Send client process ID to server
+  int pid = ::getpid();
+  fasio::error err;
+  fasio::tcp_socket Stream {SocketFD};
+  if (fasio::write(Stream, fasio::mutable_buffer {std::as_writable_bytes(std::span {&pid, 1})}, err) != sizeof(pid) || err != fasio::error::success) {
+    LogMan::Msg::EFmt("Failed sending data to FEXServer socket (error {}), disconnecting", errno);
+    close(SocketFD);
+    return -1;
+  }
+
+  return SocketFD;
 }
 
 bool SetupClient(std::string_view InterpreterPath) {
