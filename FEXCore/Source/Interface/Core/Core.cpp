@@ -809,7 +809,8 @@ bool CodeCache::SaveData(Core::InternalThreadState& Thread, int fd, const Execut
     uint32_t FormatVersion = 1;
     char FEXVersion[8] = {};
     uint32_t NumBlocks;
-    uint32_t NumBlockLinks;
+    uint32_t NumBlockLinks; // TODO: Unused
+    uint32_t NumCodePages;
     uint32_t CodeBufferSize;
     uint32_t NumRelocations;
     uint64_t SerializedBaseAddress;
@@ -817,6 +818,7 @@ bool CodeCache::SaveData(Core::InternalThreadState& Thread, int fd, const Execut
   memcpy(&header.FEXVersion[0], GIT_SHORT_HASH, strlen(GIT_SHORT_HASH)); // TODO: Assert this is the correct length
   header.NumBlocks = LookupCache.BlockList.size();
   header.NumBlockLinks = LookupCache.BlockLinks->size();
+  header.NumCodePages = LookupCache.CodePages.size();
   header.CodeBufferSize = CodeBuffer->UsedSize;
   header.NumRelocations = Relocations.size();
   header.SerializedBaseAddress = SerializedBaseAddress;
@@ -868,6 +870,13 @@ bool CodeCache::SaveData(Core::InternalThreadState& Thread, int fd, const Execut
   // TODO: Instead of dumping UsedSize, only dump the data belonging to the library!
   ::write(fd, CodeBufferData.data(), CodeBufferData.size());
 
+  // TODO: Align to 64-bit?
+  for (auto& [Page, Entrypoints] : LookupCache.CodePages) {
+    ::write(fd, &Page, sizeof(Page));
+    uint64_t NumEntrypoints = Entrypoints.size();
+    ::write(fd, &NumEntrypoints, sizeof(NumEntrypoints));
+    ::write(fd, Entrypoints.data(), Entrypoints.size() * sizeof(Entrypoints[0]));
+  }
 
   // TODO:
   // Generate and dump separate "CodeMap" at runtime:
@@ -1174,6 +1183,7 @@ void CodeCache::LoadData(Core::InternalThreadState& Thread, std::byte* MappedCac
         char FEXVersion[8] = {};
         uint32_t NumBlocks;
         uint32_t NumBlockLinks;
+        uint32_t NumCodePages;
         uint32_t CodeBufferSize;
         uint32_t NumRelocations;
         uint64_t SerializedBaseAddress;
@@ -1253,18 +1263,6 @@ void CodeCache::LoadData(Core::InternalThreadState& Thread, std::byte* MappedCac
         for (auto& [Guest, Host] : BlockList) {
           // TODO: Can we keep this enabled when re-compiling?
           LookupCache.BlockList[Guest + GuestRIPLookup.FileStartVA] = Host + reinterpret_cast<uintptr_t>(CodeBufferRange.data());
-
-          // Trigger decoder to ensure executable ranges are registered to GuestToHostMap
-          const uint8_t* GuestCode {};
-          GuestCode = reinterpret_cast<const uint8_t*>(Guest + GuestRIPLookup.FileStartVA);
-          Thread.FrontendDecoder->DecodeInstructionsAtEntry(&Thread, GuestCode, Guest + GuestRIPLookup.FileStartVA, 0 /* TODO: MaxInst */);
-
-          auto BlockInfo = Thread.FrontendDecoder->GetDecodedBlockInfo();
-          for (auto CodePage : BlockInfo->CodePages) {
-            if (Thread.LookupCache->AddBlockExecutableRange(&Thread, BlockInfo->EntryPoints, CodePage, FEXCore::Utils::FEX_PAGE_SIZE)) {
-              CTX.SyscallHandler->MarkGuestExecutableRange(&Thread, CodePage, FEXCore::Utils::FEX_PAGE_SIZE);
-            }
-          }
         }
       }
 
@@ -1293,6 +1291,30 @@ void CodeCache::LoadData(Core::InternalThreadState& Thread, std::byte* MappedCac
       // TODO: Check return value
       (void)ApplyCodeRelocations(GuestRIPLookup.FileStartVA, CodeBufferRange, Relocations, false,
                                  GuestRIPLookup.FileStartVA == header.SerializedBaseAddress);
+
+      // TODO: Align to 64-bit?
+      fextl::vector<uint64_t> Entrypoints;
+      for (uint32_t i = 0; i < header.NumCodePages; ++i) {
+        uint64_t CodePage;
+        memcpy(&CodePage, MappedCacheFile, sizeof(CodePage));
+        MappedCacheFile += sizeof(CodePage);
+
+        uint64_t NumEntrypoints;
+        memcpy(&NumEntrypoints, MappedCacheFile, sizeof(NumEntrypoints));
+        MappedCacheFile += sizeof(NumEntrypoints);
+
+        Entrypoints.resize(NumEntrypoints);
+        memcpy(Entrypoints.data(), MappedCacheFile, NumEntrypoints * sizeof(Entrypoints[0]));
+        MappedCacheFile += NumEntrypoints * sizeof(Entrypoints[0]);
+
+        // TODO: Re-use set allocations
+        if (Thread.LookupCache->AddBlockExecutableRange(&Thread, fextl::set<uint64_t> {Entrypoints.begin(), Entrypoints.end()}, CodePage,
+                                                        FEXCore::Utils::FEX_PAGE_SIZE)) {
+          // TODO: How to do this without a thread?
+          CTX.SyscallHandler->MarkGuestExecutableRange(&Thread, CodePage, FEXCore::Utils::FEX_PAGE_SIZE);
+        }
+      }
+
 
       // TODO: Invalidate any pages that are affected by ELF relocations (and eventually add support for converting those relocations to FEX relocations)
 

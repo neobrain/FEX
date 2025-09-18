@@ -76,6 +76,7 @@ struct GuestToHostMap {
 
   fextl::robin_map<uint64_t, uint64_t> BlockList;
 
+  // Maps each code page base address to a list of guest entrypoints that can reach that page
   fextl::map<uint64_t, fextl::vector<uint64_t>> CodePages;
 
   GuestToHostMap();
