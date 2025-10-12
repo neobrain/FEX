@@ -23,7 +23,6 @@ $end_info$
 #include <FEXCore/Utils/MathUtils.h>
 #include <FEXCore/Utils/SignalScopeGuards.h>
 #include <FEXCore/Utils/TypeDefines.h>
-#include <FEXHeaderUtils/Filesystem.h>
 #include <Linux/Utils/ELFParser.h>
 
 namespace FEX::HLE {
@@ -217,7 +216,6 @@ void* SyscallHandler::GuestMmap(bool Is64Bit, FEXCore::Core::InternalThreadState
 
   uint64_t Result {};
   size_t Size = FEXCore::AlignUp(length, FEXCore::Utils::FEX_PAGE_SIZE);
-  std::optional<LateApplyExtendedVolatileMetadata> LateMetadata = std::nullopt;
 
   {
     // NOTE: Frontend calls this with a nullptr Thread during initialization, but
@@ -239,16 +237,10 @@ void* SyscallHandler::GuestMmap(bool Is64Bit, FEXCore::Core::InternalThreadState
       }
     }
 
-    LateMetadata = TrackMmap(Thread, Result, length, prot, flags, fd, offset);
+    TrackMmap(Thread, Result, length, prot, flags, fd, offset);
   }
 
   InvalidateCodeRangeIfNecessary(Thread, Result, Size);
-
-  if (LateMetadata) {
-    auto CodeInvalidationlk = GuardSignalDeferringSectionWithFallback(CTX->GetCodeInvalidationMutex(), Thread);
-    CTX->AddForceTSOInformation(LateMetadata->VolatileValidRanges, std::move(LateMetadata->VolatileInstructions));
-  }
-
   return reinterpret_cast<void*>(Result);
 }
 
@@ -279,11 +271,6 @@ uint64_t SyscallHandler::GuestMunmap(bool Is64Bit, FEXCore::Core::InternalThread
     TrackMunmap(Thread, addr, length);
   }
   InvalidateCodeRangeIfNecessary(Thread, reinterpret_cast<uint64_t>(addr), Size);
-
-  if (length) {
-    auto CodeInvalidationlk = GuardSignalDeferringSectionWithFallback(CTX->GetCodeInvalidationMutex(), Thread);
-    CTX->RemoveForceTSOInformation(reinterpret_cast<uint64_t>(addr), length);
-  }
 
   return Result;
 }
@@ -387,14 +374,11 @@ uint64_t SyscallHandler::GuestShmdt(bool Is64Bit, FEXCore::Core::InternalThreadS
 }
 
 // MMan Tracking
-std::optional<SyscallHandler::LateApplyExtendedVolatileMetadata> SyscallHandler::TrackMmap(
-  FEXCore::Core::InternalThreadState* Thread, uint64_t addr, size_t length, int prot, int flags, int fd, off_t offset) {
+void SyscallHandler::TrackMmap(FEXCore::Core::InternalThreadState* Thread, uint64_t addr, size_t length, int prot, int flags, int fd, off_t offset) {
   size_t Size = FEXCore::AlignUp(length, FEXCore::Utils::FEX_PAGE_SIZE);
   const auto ProtMapping = VMATracking::VMAProt::fromProt(prot);
 
   VMATracking::MappedResource* Resource = nullptr;
-
-  std::optional<SyscallHandler::LateApplyExtendedVolatileMetadata> VolatileMetadata = std::nullopt;
 
   if (!(flags & MAP_ANONYMOUS)) {
     struct stat64 buf;
@@ -450,21 +434,6 @@ std::optional<SyscallHandler::LateApplyExtendedVolatileMetadata> SyscallHandler:
         LOGMAN_THROW_A_FMT(ResourceIt != ResourceEnd, "ERROR: Could not find base for file mapping at {:#x} (offset {:#x})", addr, offset);
         Resource = &ResourceIt->second;
       }
-
-      const fextl::string Filename = FHU::Filesystem::GetFilename(Resource->MappedFile->Filename);
-
-      // We now have the filename and the offset in the filename getting mapped.
-      // Check for extended volatile metadata.
-      auto it = ExtendedMetaData.find(Filename);
-      if (it != ExtendedMetaData.end()) {
-        SyscallHandler::LateApplyExtendedVolatileMetadata LateMetadata;
-        FEX::VolatileMetadata::ApplyFEXExtendedVolatileMetadata(
-          it->second, LateMetadata.VolatileInstructions, LateMetadata.VolatileValidRanges, addr, addr + length, offset, offset + length);
-
-        if (!LateMetadata.VolatileInstructions.empty() || !LateMetadata.VolatileValidRanges.Empty()) {
-          VolatileMetadata.emplace(std::move(LateMetadata));
-        }
-      }
     }
   } else if (flags & MAP_SHARED) {
     VMATracking::MRID mrid {VMATracking::SpecialDev::Anon, AnonSharedId++};
@@ -477,8 +446,7 @@ std::optional<SyscallHandler::LateApplyExtendedVolatileMetadata> SyscallHandler:
     Resource->Iterator = Iter;
   }
 
-  VMATracking.TrackVMARange(CTX, Resource, addr, offset, Size, VMATracking::VMAFlags::fromFlags(flags), ProtMapping);
-  return VolatileMetadata;
+  VMATracking.TrackVMARange(CTX, Resource, addr, offset, Size, VMATracking::VMAFlags::fromFlags(flags), VMATracking::VMAProt::fromProt(prot));
 }
 
 void SyscallHandler::TrackMunmap(FEXCore::Core::InternalThreadState* Thread, void* addr, size_t length) {
