@@ -253,13 +253,24 @@ static std::pair<bool, fextl::vector<Elf64_Phdr>> ReadELFHeaders(int FD, std::sp
     PEParser Parser(dupfd);
     if (Parser) {
       fextl::vector<Elf64_Phdr> ElfSections;
-      ElfSections.push_back({.p_offset = 0, .p_vaddr = Parser.ImageBase, .p_filesz = 0x1000 /* TODO: use size of headers? */});
+      ElfSections.push_back(
+        {.p_type = PT_LOAD, .p_flags = PF_X | PF_W | PF_R, .p_offset = 0, .p_vaddr = Parser.ImageBase, .p_filesz = 0x1000 /* TODO: use size of headers? */});
       for (auto& Section : Parser.Sections) {
         // Convert to elf header
         Elf64_Phdr ElfSection {};
         ElfSection.p_offset = Section.PointerToRawData;
         ElfSection.p_vaddr = Parser.ImageBase + Section.VirtualAddress;
         ElfSection.p_filesz = Section.SizeOfRawData;
+        ElfSection.p_type = PT_LOAD;
+        if (Section.Characteristics & 0x20000000) {
+          ElfSection.p_flags |= PF_X;
+        }
+        if (Section.Characteristics & 0x40000000) {
+          ElfSection.p_flags |= PF_R;
+        }
+        if (Section.Characteristics & 0x80000000) {
+          ElfSection.p_flags |= PF_W;
+        }
         ElfSections.push_back(ElfSection);
       }
       return std::pair {Parser.Is64Bit, std::move(ElfSections)};
@@ -426,7 +437,7 @@ uint64_t SyscallHandler::GuestMprotect(FEXCore::Core::InternalThreadState* Threa
             }
           }
 
-          // VMA->DelayedCacheLoad = false;
+          VMA->DelayedCacheLoad = false;
         }
       }
     }
@@ -516,7 +527,7 @@ FEXCore::ExecutableFileInfo* SyscallHandler::TrackMmap(FEXCore::Core::InternalTh
     if (VMAEntry != VMATracking.VMAs.end() &&
         VMAEntry->first == addr /* TODO: Technically the range could have been merged with another one... */ && !VMAEntry->second.Resource) {
       // fmt::print(stderr, "Detected PE header mmap at address {:#x}\n", addr);
-      // WineCase = true;
+      WineCase = true;
     }
   }
 
@@ -567,9 +578,12 @@ FEXCore::ExecutableFileInfo* SyscallHandler::TrackMmap(FEXCore::Core::InternalTh
 
         ResourceIt = std::find_if(ResourceIt, ResourceEnd, [&](const VMATracking::MappedResource::ContainerType::value_type& ResourcePair) {
           auto& Resource = ResourcePair.second;
+          auto ProtFlags = VMATracking::VMAProt::fromProt(prot); // TODO: Move to BinParser?
           auto ExpectedBase = FEXCore::InferMappingBaseAddress(
             Resource.ProgramHeaders, addr, Size, offset,
-            (ProtMapping.Executable ? PF_X : 0) | (ProtMapping.Writable ? PF_W : 0) | (ProtMapping.Readable ? PF_R : 0));
+            +(ProtFlags.Executable ? PF_X : 0) | (ProtFlags.Writable ? PF_W : 0) | (ProtFlags.Readable ? PF_R : 0),
+            *(char*)(Resource.FirstVMA->Base) == 'M' /* TODO: Properly detect PE */);
+
           return ExpectedBase == Resource.FirstVMA->Base;
         });
         LOGMAN_THROW_A_FMT(ResourceIt != ResourceEnd, "ERROR: Could not find base for file mapping at {:#x} (offset {:#x})", addr, offset);

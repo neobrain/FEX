@@ -19,8 +19,8 @@ namespace FEXCore {
  * mapping (file offset = 0). Instead, this function searches the corresponding ELF program headers
  * for an entry that generated the given file mapping.
  */
-inline std::optional<uint64_t>
-InferMappingBaseAddress(std::span<const Elf64_Phdr> ProgramHeaders, uint64_t Addr, uint64_t Size, uint64_t FileOffset, int AccessFlags) {
+inline std::optional<uint64_t> InferMappingBaseAddress(std::span<const Elf64_Phdr> ProgramHeaders, uint64_t Addr, uint64_t Size,
+                                                       uint64_t FileOffset, int AccessFlags, bool IsWine = false) {
   for (auto& phdr : ProgramHeaders) {
     if (phdr.p_type != PT_LOAD) {
       // Skip headers that don't trigger memory mappings
@@ -28,7 +28,13 @@ InferMappingBaseAddress(std::span<const Elf64_Phdr> ProgramHeaders, uint64_t Add
     }
 
     if ((phdr.p_flags & (PF_X | PF_W | PF_R)) != (AccessFlags & (PF_X | PF_W | PF_R))) {
-      continue;
+      if (!IsWine) {
+        continue;
+      } else {
+        // Wine maps PE sections as RW, so we can't use flags to distinguish mmap calls.
+        // Luckily the mapping is direct in that case anyway, so the result will be reliable
+        // even without the extra information.
+      }
     }
 
     // The mapped file offset must be included at the start of the section header
