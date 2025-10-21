@@ -24,6 +24,14 @@ struct ELFParser {
   fextl::string InterpreterElf;
   int fd {-1};
 
+  ELFParser() = default;
+  ELFParser(const ELFParser&) = delete;
+  ELFParser(ELFParser&& Other) noexcept : fd(std::exchange(Other.fd, -1)) {
+  }
+
+  ELFParser* operator=(const ELFParser& Other) = delete;
+  ELFParser* operator=(ELFParser&& Other) = delete;
+
   bool ReadElf(int NewFD) {
     Closefd();
     static_assert(EI_CLASS == 4);
@@ -44,7 +52,7 @@ struct ELFParser {
       return false;
     }
 
-    // Reset to beginning
+    // Reset to beginning (TODO: Not needed since we use pread!)
     if (lseek(fd, 0, SEEK_SET) == -1) {
       return false;
     }

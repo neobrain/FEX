@@ -70,6 +70,10 @@ private:
         return false;
       }
 
+      // Acquire exclusive lock to prevent FEXServer from processing this file eagerly
+      [[maybe_unused]] auto ret = flock(CodeMapFD.value(), LOCK_EX);
+      LOGMAN_THROW_A_FMT(ret == 0, "Could not lock code map");
+
       // Ensure the file descriptor is closed in fork children
       auto flags = fcntl(CodeMapFD.value(), F_GETFD);
       fcntl(CodeMapFD.value(), F_SETFD, flags | FD_CLOEXEC);

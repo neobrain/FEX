@@ -248,7 +248,8 @@ public:
   uint64_t GuestShmdt(bool Is64Bit, FEXCore::Core::InternalThreadState*, const void* shmaddr);
 
   ///// Memory Manager tracking /////
-  void TrackMmap(FEXCore::Core::InternalThreadState* Thread, uint64_t addr, size_t length, int prot, int flags, int fd, off_t offset);
+  FEXCore::ExecutableFileInfo* // TODO: Should be ExecutableFileSectionInfo
+  TrackMmap(FEXCore::Core::InternalThreadState* Thread, uint64_t addr, size_t length, int prot, int flags, int fd, off_t offset);
   void TrackMunmap(FEXCore::Core::InternalThreadState* Thread, void* addr, size_t length);
   void TrackMremap(FEXCore::Core::InternalThreadState* Thread, uint64_t OldAddress, size_t OldSize, size_t NewSize, int flags, uint64_t NewAddress);
   void TrackShmat(FEXCore::Core::InternalThreadState* Thread, int shmid, uint64_t shmaddr, int shmflg, uint64_t Length);
@@ -289,6 +290,8 @@ public:
   std::optional<FEXCore::ExecutableFileSectionInfo>
   LookupExecutableFileSection(FEXCore::Core::InternalThreadState& Thread, uint64_t GuestAddr) final override;
 
+  void TriggerPostStartupCodeCacheLoad(FEXCore::Core::InternalThreadState&);
+
   FEXCore::HLE::ExecutableRangeInfo QueryGuestExecutableRange(FEXCore::Core::InternalThreadState* Thread, uint64_t Address) override;
 
   ///// FORK tracking /////
@@ -318,6 +321,11 @@ public:
   constexpr static size_t LDT_ENTRY_SIZE = sizeof(FEXCore::Core::CPUState::gdt_segment);
 
   VMATracking::VMATracking VMATracking;
+  // Collects file mappings added during FEX startup.
+  // Each entry consists of the VMA mapping start, a reference to the mapped file, and a file descriptor
+  fextl::vector<std::tuple<uint64_t, FEXCore::ExecutableFileInfo*, int>> StartupBinaryLoads;
+
+  const uint64_t CodeCacheConfigId = 0; // TODO: Make unique to active configuration
 
   uint64_t read_ldt(FEXCore::Core::CpuStateFrame* Frame, void* ptr, unsigned long bytecount);
   uint64_t write_ldt(FEXCore::Core::CpuStateFrame* Frame, void* ptr, unsigned long bytecount, bool legacy);

@@ -11,6 +11,8 @@ desc: Main glue logic of the arm64 splatter backend
 $end_info$
 */
 
+#include "Common/FDUtils.h"
+#include "FEXCore/Utils/DebuggerPresence.h"
 #include "Interface/Context/Context.h"
 #include "Interface/Core/LookupCache.h"
 #include "Interface/Core/Dispatcher/Dispatcher.h"
@@ -36,6 +38,7 @@ $end_info$
 
 #include <cstdio>
 #include <cstring>
+#include <ranges>
 #include <unistd.h>
 
 namespace {
@@ -688,6 +691,8 @@ void Arm64JITCore::ClearCache() {
   EmitDetectionString();
 
   ThreadState->LookupCache->ChangeGuestToHostMapping(*PrevCodeBuffer, *CurrentCodeBuffer->LookupCache, lk);
+
+  Relocations.clear();
 }
 
 Arm64JITCore::~Arm64JITCore() {}
@@ -817,9 +822,23 @@ void Arm64JITCore::EmitEntryPoint(ARMEmitter::BackwardLabel& HeaderLabel, bool C
   EmitSuspendInterruptCheck();
 }
 
+extern "C" {
+bool g_print_ir = false;
+}
+
 CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size, bool SingleInst, const FEXCore::IR::IRListView* IR,
                                                    FEXCore::Core::DebugData* DebugData, bool CheckTF) {
   FEXCORE_PROFILE_SCOPED("Arm64::CompileCode");
+
+  // ERROR_AND_DIE_FMT("TODO: Compiling new code will overwrite CodeBuffer. Make sure to adjust the write cursor!");
+  if (g_print_ir) {
+    fextl::stringstream ss;
+    FEXCore::IR::Dump(&ss, &*IR);
+    LogMan::Msg::EFmt("IR:\n{}", ss.str());
+  }
+
+  const auto PrevNumAllocations = Relocations.size();
+
   this->Entry = Entry;
   this->DebugData = DebugData;
   this->IR = IR;
@@ -1099,6 +1118,19 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
       EntryPoint.second += Delta;
     }
     CodeBegin += Delta;
+
+    for (auto& Relocation : Relocations | std::ranges::views::drop(PrevNumAllocations)) {
+      switch (Relocation.Header.Type) {
+      case FEXCore::CPU::RelocationTypes::RELOC_NAMED_SYMBOL_LITERAL:
+        Relocation.NamedSymbolLiteral.Offset += CodeBuffers.LatestOffset;
+        break;
+
+      case FEXCore::CPU::RelocationTypes::RELOC_NAMED_THUNK_MOVE: Relocation.NamedThunkMove.Offset += CodeBuffers.LatestOffset; break;
+
+      case FEXCore::CPU::RelocationTypes::RELOC_GUEST_RIP_MOVE:
+      case FEXCore::CPU::RelocationTypes::RELOC_GUEST_RIP_LITERAL: Relocation.GuestRIPMove.Offset += CodeBuffers.LatestOffset; break;
+      }
+    }
 
     // Copy over CodeBuffer contents
     memcpy(GetCursorAddress<uint8_t*>(), TempCodeBuffer, TempSize);

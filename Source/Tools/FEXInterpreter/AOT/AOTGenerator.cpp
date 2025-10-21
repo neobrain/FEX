@@ -17,68 +17,83 @@
 #include <thread>
 
 namespace FEX::AOT {
-void AOTGenSection(FEXCore::Context::Context* CTX, ELFCodeLoader::LoadedSection& Section) {
+void AOTGenSection(FEXCore::Core::InternalThreadState& ParentThread, FEXCore::Context::Context* CTX, ELFCodeLoader::LoadedSection& Section,
+                   fextl::set<uintptr_t> InitialBranchTargets) {
+  // TODO: Constrain to specific object more cleanly
+  // TODO: Ensure cross-section jumps are always long!
+
+  fmt::print(stderr, "Running AOT gen for {}\n", Section.Filename);
+  auto off = Section.Filename.find_last_of('/');
+  auto full_ext = (off == std::string::npos) ? Section.Filename.end() : (Section.Filename.begin() + off);
+  full_ext = std::find(full_ext, Section.Filename.end(), '.');
+
   // Make sure this section is executable and big enough
   if (!Section.Executable || Section.Size < 16) {
     return;
   }
 
-  fextl::set<uintptr_t> InitialBranchTargets;
-
   // Load the ELF again with symbol parsing this time
   ELFLoader::ELFContainer container {Section.Filename, "", true};
 
   // Add symbols to the branch targets list
-  container.AddSymbols([&](ELFLoader::ELFSymbol* sym) {
-    auto Destination = sym->Address + Section.ElfBase;
+  // TODO: Hits debug assertions about VEX.R in /home/tony/.fex-emu/RootFS/Ubuntu_24_04/usr/lib/i386-linux-gnu/libGLX_mesa.so.0.0.0
+  if (true && false) {
+    container.AddSymbols([&](ELFLoader::ELFSymbol* sym) {
+      auto Destination = sym->Address + Section.ElfBase;
 
-    if (!(Destination >= Section.Base && Destination <= (Section.Base + Section.Size))) {
-      return; // outside of current section, unlikely to be real code
-    }
+      if (!(Destination >= Section.Base && Destination <= (Section.Base + Section.Size))) {
+        return; // outside of current section, unlikely to be real code
+      }
 
-    InitialBranchTargets.insert(Destination);
-  });
+      InitialBranchTargets.insert(Destination);
+    });
+  }
 
   LogMan::Msg::IFmt("Symbol seed: {}", InitialBranchTargets.size());
 
   // Add unwind entries to the branch target list
-  container.AddUnwindEntries([&](uintptr_t Entry) {
-    auto Destination = Entry + Section.ElfBase;
+  // TODO: This breaks Ender Lilies
+  if (false) {
+    container.AddUnwindEntries([&](uintptr_t Entry) {
+      auto Destination = Entry + Section.ElfBase;
 
-    if (!(Destination >= Section.Base && Destination <= (Section.Base + Section.Size))) {
-      return; // outside of current section, unlikely to be real code
-    }
+      if (!(Destination >= Section.Base && Destination <= (Section.Base + Section.Size))) {
+        return; // outside of current section, unlikely to be real code
+      }
 
-    InitialBranchTargets.insert(Destination);
-  });
+      InitialBranchTargets.insert(Destination);
+    });
+  }
 
   LogMan::Msg::IFmt("Symbol + Unwind seed: {}", InitialBranchTargets.size());
 
   // Scan the executable section and try to find function entries
-  for (size_t Offset = 0; Offset < (Section.Size - 16); Offset++) {
-    uint8_t* pCode = (uint8_t*)(Section.Base + Offset);
+  if (false) {
+    for (size_t Offset = 0; Offset < (Section.Size - 16); Offset++) {
+      uint8_t* pCode = (uint8_t*)(Section.Base + Offset);
 
-    // Possible CALL <disp32>
-    if (*pCode == 0xE8) {
-      uintptr_t Destination = (int)(pCode[1] | (pCode[2] << 8) | (pCode[3] << 16) | (pCode[4] << 24));
-      Destination += (uintptr_t)pCode + 5;
+      // Possible CALL <disp32>
+      if (*pCode == 0xE8) {
+        uintptr_t Destination = (int)(pCode[1] | (pCode[2] << 8) | (pCode[3] << 16) | (pCode[4] << 24));
+        Destination += (uintptr_t)pCode + 5;
 
-      auto DestinationPtr = (uint8_t*)Destination;
+        auto DestinationPtr = (uint8_t*)Destination;
 
-      if (!(Destination >= Section.Base && Destination <= (Section.Base + Section.Size))) {
-        continue; // outside of current section, unlikely to be real code
+        if (!(Destination >= Section.Base && Destination <= (Section.Base + Section.Size))) {
+          continue; // outside of current section, unlikely to be real code
+        }
+
+        if (DestinationPtr[0] == 0 && DestinationPtr[1] == 0) {
+          continue; // add al, [rax], unlikely to be real code
+        }
+
+        InitialBranchTargets.insert(Destination);
       }
 
-      if (DestinationPtr[0] == 0 && DestinationPtr[1] == 0) {
-        continue; // add al, [rax], unlikely to be real code
+      // endbr64 marker marks an indirect branch destination
+      if (pCode[0] == 0xf3 && pCode[1] == 0x0f && pCode[2] == 0x1e && pCode[3] == 0xfa) {
+        InitialBranchTargets.insert((uintptr_t)pCode);
       }
-
-      InitialBranchTargets.insert(Destination);
-    }
-
-    // endbr64 marker marks an indirect branch destination
-    if (pCode[0] == 0xf3 && pCode[1] == 0x0f && pCode[2] == 0x1e && pCode[3] == 0xfa) {
-      InitialBranchTargets.insert((uintptr_t)pCode);
     }
   }
 
@@ -107,7 +122,8 @@ void AOTGenSection(FEXCore::Context::Context* CTX, ELFCodeLoader::LoadedSection&
       setpriority(PRIO_PROCESS, FHU::Syscalls::gettid(), 19);
 
       // Setup thread - Each compilation thread uses its own backing FEX thread
-      auto Thread = CTX->CreateThread(0, 0);
+      // auto Thread = CTX->CreateThread(0, 0);
+      auto* Thread = &ParentThread;
       fextl::set<uint64_t> ExternalBranchesLocal;
       CTX->ConfigureAOTGen(Thread, &ExternalBranchesLocal, SectionMaxAddress);
 
@@ -139,16 +155,15 @@ void AOTGenSection(FEXCore::Context::Context* CTX, ELFCodeLoader::LoadedSection&
         ExternalBranchesLocal.clear();
       }
 
-      // Thread->CPUBackend.get()
-
-      // Thread->LookupCache;
-
-      // TODO: Dump LookupCache to file (through new CPUBackend interface?)
-      // TODO: Dump CodeBuffer to file (through new CPUBackend interface?)
-
+      // TODO: Only for FEXServer...
+      // // Write cache to disk. Existing files are atomically replaced
+      // int fd = ::open("/tmp/fexcache.new", O_WRONLY | O_TRUNC);
+      // CTX->FinalizeAOTIRCache(*Thread, fd);
+      // close(fd);
+      // ::rename("/tmp/fexcache.new", "/tmp/fexcache");
 
       // All entryproints processed, cleanup this thread
-      CTX->DestroyThread(Thread);
+      // CTX->DestroyThread(Thread);
       // This thread is now getting abandoned. Disable glibc allocator checking so glibc can safely cleanup its internal allocations.
       // FEXCore::Allocator::YesIKnowImNotSupposedToUseTheGlibcAllocator::HardDisable();
 

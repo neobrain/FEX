@@ -1,15 +1,13 @@
 // SPDX-License-Identifier: MIT
+#include <CodeMapWriterSingleThreaded.h>
 #include "FEXHeaderUtils/Syscalls.h"
 #include "Logger.h"
 #include "SquashFS.h"
 
 #include <Common/AsyncNet.h>
 #include <Common/Config.h>
-#include <Common/FDUtils.h>
 #include <Common/FEXServerClient.h>
-
-#include <FEXCore/Core/CodeCache.h>
-#include <FEXCore/HLE/SourcecodeResolver.h>
+#include <FEXCore/Utils/EnumUtils.h>
 
 #include <fmt/ranges.h>
 
@@ -17,14 +15,42 @@
 #include <cassert>
 #include <fcntl.h>
 #include <filesystem>
+#include <fstream>
 #include <poll.h>
 #include <string>
+#include <sys/file.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/wait.h>
 #include <vector>
 
+
+#include "Tools/FEXInterpreter/ELFCodeLoader.h"
+#include "Linux/Utils/ELFParser.h"
+#include "FEXCore/Core/Context.h"
+#include "Common/HostFeatures.h"
+// #include "DummyHandlers.h"
+#include "Tools/LinuxEmulation/LinuxSyscalls/x64/Syscalls.h"
+
 #include <xxhash.h>
+
+// TODO: Drop this type alias
+// TODO: Alternatively, make this a thing wrapper around ExecutableFileInfo, so that we can add a copy constructor as well
+using FileIdWithPath = FEXCore::ExecutableFileInfo;
+
+namespace FEXCore {
+inline bool operator<(const FileIdWithPath& a, const FileIdWithPath& b) noexcept {
+  return a.FileId < b.FileId;
+}
+} // namespace FEXCore
+
+template<>
+struct std::hash<FileIdWithPath> {
+  std::size_t operator()(const FileIdWithPath& Val) const noexcept {
+    return Val.FileId;
+  }
+};
 
 namespace ProcessPipe {
 constexpr int USER_PERMS = S_IRWXU | S_IRWXG | S_IRWXO;
@@ -126,7 +152,7 @@ bool InitializeServerPipe() {
     ServerLockFD = open(ServerLockPath.c_str(), O_RDWR | O_CLOEXEC, USER_PERMS);
     if (ServerLockFD != -1) {
       // Now that we have opened the file, try to get a write lock.
-      flock lk {
+      struct flock lk {
         .l_type = F_WRLCK,
         .l_whence = SEEK_SET,
         .l_start = 0,
@@ -153,7 +179,7 @@ bool InitializeServerPipe() {
     return false;
   } else {
     // FIFO file was created. Try to get a write lock
-    flock lk {
+    struct flock lk {
       .l_type = F_WRLCK,
       .l_whence = SEEK_SET,
       .l_start = 0,
@@ -170,7 +196,7 @@ bool InitializeServerPipe() {
   }
 
   // Now that a write lock is held, downgrade it to a read lock
-  flock lk {
+  struct flock lk {
     .l_type = F_RDLCK,
     .l_whence = SEEK_SET,
     .l_start = 0,
@@ -270,14 +296,38 @@ void SendFDSuccessPacket(fasio::tcp_socket& Socket, int FD) {
   write(Socket, Data, ec);
 }
 
+int32_t EmbedSubprocess(const char* path, char* const* args) {
+  pid_t pid = fork();
+  if (pid == 0) {
+    execvp(path, args);
+    _exit(-1);
+  } else {
+    int32_t Status {};
+    while (waitpid(pid, &Status, 0) == -1 && errno == EINTR)
+      ;
+    if (WIFEXITED(Status)) {
+      return (int8_t)WEXITSTATUS(Status);
+    }
+  }
+
+  return -1;
+}
+
+static int RunOfflineCompiler(const char* CodeMap) {
+  const char* ExecveArgs[] = {"FEXOfflineCompiler", "generate", "--codemap", CodeMap, nullptr};
+  return EmbedSubprocess("FEXOfflineCompiler", const_cast<char* const*>(&ExecveArgs[0]));
+};
+
 void HandleSocketData(fasio::tcp_socket& Socket) {
   std::vector<uint8_t> Data(1500);
 
   // Get the current number of FDs of the process before we start handling sockets.
   GetMaxFDs();
 
+  // fasio::mutable_buffer buffer = {std::as_writable_bytes(std::span(Data))};
+  fasio::mutable_buffer buffer = {std::as_writable_bytes(std::span(Data).subspan(0, 4))};
   int inFD = -1;
-  fasio::mutable_buffer buffer = {std::as_writable_bytes(std::span(Data)), nullptr, &inFD};
+  buffer.FD = &inFD;
 
   {
     fasio::error ec;
@@ -286,10 +336,10 @@ void HandleSocketData(fasio::tcp_socket& Socket) {
     if (ec == fasio::error::success) {
       assert(Read >= sizeof(FEXServerClient::FEXServerRequestPacket));
       buffer = {buffer.Data.subspan(0, Read)};
-    } else if (ec == fasio::error::eof) {
+    } else if (ec == fasio::error::generic_errno) {
+      perror("read");
       return;
     } else {
-      perror("read");
       return;
     }
   }
@@ -380,14 +430,213 @@ void HandleSocketData(fasio::tcp_socket& Socket) {
       break;
     }
 
+    case FEXServerClient::PacketType::TYPE_QUERY_CODE_CACHE:
+    case FEXServerClient::PacketType::TYPE_QUERY_CODE_CACHE_NO_MULTIBLOCK: {
+      char Tmp[PATH_MAX];
+      int TmpLen = FEX::get_fdpath(inFD, Tmp);
+      assert(TmpLen != -1);
+
+      // TODO: Move to common code
+      // TODO: Use file id from ELF build id instead
+      std::filesystem::path Path {std::string_view(Tmp, TmpLen)};
+      auto filename_hash = XXH3_64bits(Tmp, TmpLen);
+      const bool HasMultiblock = (Req->Header.Type == FEXServerClient::PacketType::TYPE_QUERY_CODE_CACHE);
+
+      FileIdWithPath MainFileId = {nullptr, filename_hash, fextl::string(Tmp, TmpLen)};
+      fmt::print("Requested {}cache for: {}\n", HasMultiblock ? "" : "nomb-", MainFileId.Filename);
+
+      // Detect code maps by incrementing index
+      // TODO: Check for non-empty and for flock(FLOCK_EX):
+      //       - If empty, we tried generating the cache before the client could even lock it
+      //       - If exclusively lockable, we know the client either closed or crashed
+      // TODO: If there are any (or more than N) pending code maps, stop handing out new code map FDs
+      std::vector<std::string> CodeMaps;
+      for (int Index = 0; true; ++Index) {
+        auto CodeMap = fmt::format(
+          "{}/{}.{}.bin", CodeMapDirectory,
+          FEXCore::CodeMap::GetBaseFilename(FEXCore::ExecutableFileInfo {nullptr, MainFileId.FileId, MainFileId.Filename}, !HasMultiblock), Index);
+        auto FD = open(CodeMap.c_str(), O_RDONLY);
+        if (FD == -1) {
+          break;
+        }
+
+        // Acquire exclusive lock to ensure the client process is done writing data.
+        // Also ensure the file is non-empty, otherwise we're racing the client in acquiring the initial lock.
+        struct stat FileStats;
+        fstat(FD, &FileStats);
+        if (FileStats.st_size == 0 || flock(FD, LOCK_EX | LOCK_NB) != 0) {
+          fmt::print("Code map {} is still in use, skipping\n", CodeMap);
+          // Still being written to by a client process, so skip this file
+          // TODO: Rename from X.n.bin to X.0.bin (once the latter has been removed!) to ensure we'll catch it on next run
+          close(FD);
+          continue;
+        }
+        close(FD);
+        CodeMaps.push_back(CodeMap);
+      }
+
+      // TODO: Eh.
+      auto ParseCodeMap = [](std::ifstream& Codemap) {
+        auto Parsed = FEXCore::CodeMap::ParseCodeMap(Codemap);
+
+        std::map<FileIdWithPath, fextl::set<uintptr_t>> Ret;
+        for (auto& [FileId, Contents] : Parsed) {
+          Ret.emplace(std::piecewise_construct, std::forward_as_tuple(nullptr, FileId, std::move(Contents.Filename)),
+                      std::forward_as_tuple(std::move(Contents.Blocks)));
+        }
+
+        return Ret;
+      };
+
+      auto GetCacheFilename = [](const FileIdWithPath& FileId) {
+        return fmt::format("{}cache/{}-{:016x}", FEX::Config::GetCacheDirectory(),
+                           FEXCore::CodeMap::GetBaseFilename(FEXCore::ExecutableFileInfo {nullptr, FileId.FileId, FileId.Filename}, false),
+                           0 /* TODO: Use unique cache id */);
+      };
+      auto CodeCacheId = GetCacheFilename(MainFileId);
+
+      // TODO: Also check if cache is older than code map
+      // TODO: Also check if cache is from old FEX version
+      const bool MainFileNeedsGeneration =
+        !std::filesystem::exists(CodeCacheId) &&
+        std::filesystem::exists(fmt::format(
+          "{}/merged.{}", CodeMapDirectory,
+          FEXCore::CodeMap::GetBaseFilename(FEXCore::ExecutableFileInfo {nullptr, MainFileId.FileId, MainFileId.Filename}, !HasMultiblock)));
+
+      std::set<FileIdWithPath> CachesToBeGenerated;
+      if (MainFileNeedsGeneration) {
+        CachesToBeGenerated.emplace(nullptr, MainFileId.FileId, MainFileId.Filename);
+      }
+      // Trigger recompile if unprocessed (pending but finalized) code maps exist
+      // TODO: Debounce this though. Only recompile if "time_since_last_offline_compile * size_of_codemap / size_of_existing_cache > N"
+      if (!CodeMaps.empty() || MainFileNeedsGeneration) { // TODO: Also generate if the actual caches don't exist yet!
+        fmt::print("Found {} new code maps, updating reference code map\n", CodeMaps.size());
+
+        // 1. Parse NEW code maps
+        std::map<FileIdWithPath, fextl::set<uintptr_t>> IncomingCodeMap;
+        for (auto& CodeMap : CodeMaps) {
+          std::ifstream Incoming(CodeMap); // TODO: Binary?
+          auto NewBlocks = ParseCodeMap(Incoming);
+          while (!NewBlocks.empty()) {
+            IncomingCodeMap.insert(NewBlocks.extract(NewBlocks.begin()));
+          }
+        }
+
+        // 2. For each referenced library, add referenced offsets to that library's reference code map
+        for (const auto& [File, NewBlocks] : IncomingCodeMap) {
+          const auto BinaryName =
+            (std::string)FEXCore::CodeMap::GetBaseFilename(FEXCore::ExecutableFileInfo {nullptr, File.FileId, File.Filename}, !HasMultiblock);
+          fmt::print("Processing code map merged.{} for {}\n", BinaryName, File.Filename);
+          {
+            auto Blocks = NewBlocks;
+            auto MergedCodeMapFilename = fmt::format("{}/merged.{}", CodeMapDirectory, BinaryName);
+
+            if (auto ReferenceCodeMap = std::ifstream(MergedCodeMapFilename)) {
+              // TODO: is .at() fine to use?
+              auto PreviousBlocks = std::move(ParseCodeMap(ReferenceCodeMap).at(File));
+              auto NumPreviousBlocks = PreviousBlocks.size();
+              Blocks.merge(std::move(PreviousBlocks));
+              if (Blocks.size() == NumPreviousBlocks) {
+                // No blocks added; skip this library if the cache is newer than the merged codemap
+                std::error_code ec;
+                const auto LastCodeMapUpdate = std::filesystem::last_write_time(MergedCodeMapFilename, ec);
+                if (std::filesystem::last_write_time(GetCacheFilename(File), ec) < LastCodeMapUpdate || ec) {
+                  fmt::println("Outdated cache for current configuration; regenerating", NumPreviousBlocks);
+                  CachesToBeGenerated.emplace(nullptr, File.FileId, File.Filename);
+                } else {
+                  fmt::println("No new blocks; skipping (current {})", NumPreviousBlocks);
+                }
+
+                continue;
+              } else {
+                fmt::println("Found {} new blocks (previous {})", Blocks.size() - NumPreviousBlocks, NumPreviousBlocks);
+                if (Blocks.size() > 0) {
+                  // continue;
+                }
+              }
+            }
+
+            CachesToBeGenerated.emplace(nullptr, File.FileId, File.Filename);
+            {
+              fmt::print("Writing {} blocks to {}\n", Blocks.size(), fmt::format("{}/merged.{}", CodeMapDirectory, BinaryName));
+
+              FEX::CodeMapWriterSingleThreaded OutputCodeMap(fmt::format("{}/merged.{}", CodeMapDirectory, BinaryName));
+              if (File.FileId == MainFileId.FileId) {
+                fmt::println("MAIN FILE ID: {}", File.Filename);
+                OutputCodeMap.AppendSetMainExecutable(FEXCore::ExecutableFileInfo {nullptr, MainFileId.FileId, MainFileId.Filename});
+                for (auto& [File2, _] : IncomingCodeMap) {
+                  // List the main executable and all used libraries
+                  OutputCodeMap.AppendLibraryLoad(FEXCore::ExecutableFileInfo {nullptr, File2.FileId, File2.Filename});
+                }
+              } else {
+                // List only the library itself
+                OutputCodeMap.AppendLibraryLoad(FEXCore::ExecutableFileInfo {nullptr, File.FileId, File.Filename});
+              }
+
+              auto FileInfo = FEXCore::ExecutableFileInfo {nullptr, File.FileId, File.Filename};
+              for (auto& Block : Blocks) {
+                OutputCodeMap.AppendBlock(FEXCore::ExecutableFileSectionInfo {FileInfo, 0}, Block);
+              }
+            }
+          }
+        }
+
+        // 3. Delete all NEW code maps
+        for (auto& CodeMapFile : CodeMaps) {
+          std::filesystem::remove(CodeMapFile);
+          // TODO: Rename any pending (not finalized) code maps to PROGRAMNAME.0.bin so it will be found on the next run
+        }
+
+        // 4. Trigger offline-compile for each binary that needs it
+        for (const auto& File : CachesToBeGenerated) {
+          // Generate cache for each referenced library (if it has new code map entries)
+          // TODO: For libraries that are loaded in a sandbox (e.g. pressure vessel), this will fail. We should retry once the library is actually loaded at runtime
+          const auto BinaryName =
+            (std::string)FEXCore::CodeMap::GetBaseFilename(FEXCore::ExecutableFileInfo {nullptr, File.FileId, File.Filename}, !HasMultiblock);
+          fmt::println("Generating cache for merged.{}", BinaryName);
+          int Status = RunOfflineCompiler(fmt::format("{}/merged.{}", CodeMapDirectory, BinaryName).c_str());
+          if (Status != 0) {
+            fmt::println("ERROR: Cache generation failed with status {}", Status);
+          }
+        }
+      }
+
+      // 5. Return FD for generated cache to client
+      //      auto CacheFD = Path.filename() < "k" ? open(CodeCacheId.c_str(), O_RDONLY) : -1;
+      // auto CacheFD = (Path == "/run/fex-emu/rootfs/usr/lib64/ld-linux-x86-64.so.2") ? open(CodeCacheId.c_str(), O_RDONLY) : -1;
+      // auto CacheFD = (Path == "/run/fex-emu/rootfs/usr/lib64/ld-linux-x86-64.so.2") ? open(CodeCacheId.c_str(), O_RDONLY) : -1;
+      auto CacheFD = open(CodeCacheId.c_str(), O_RDONLY);
+      FEXServerClient::FEXServerResultPacket Res {
+        .Header {
+          .Type = FEXServerClient::PacketType::TYPE_SUCCESS,
+        },
+      };
+
+      fasio::mutable_buffer Data = {.Data = std::as_writable_bytes(std::span(&Res, 1)),
+                                    .FD = (CacheFD != -1 ? std::optional {&CacheFD} : std::nullopt)};
+      fasio::error ec;
+      write(Socket, Data, ec);
+      buffer += sizeof(FEXServerClient::FEXServerRequestPacket::Header);
+      close(CacheFD);
+      break;
+    }
+
     case FEXServerClient::PacketType::TYPE_QUERY_CODE_MAP:
     case FEXServerClient::PacketType::TYPE_QUERY_CODE_MAP_NO_MULTIBLOCK: {
+      // TODO: Keep a map of clients that are already writing a code map.
+      //       No more than one instance of each application should write code
+      //       maps to avoid spamming the file system for high-frequency
+      //       invocations of the same program!
+
+      // TODO: Use code map id instead of just the binarypath!
+
       char Tmp[PATH_MAX];
       int TmpLen = FEX::get_fdpath(inFD, Tmp);
       assert(TmpLen != -1);
       fmt::print("Requested code map FD for: {}\n", std::string_view(Tmp, TmpLen));
       std::filesystem::path BinaryPath = std::string_view(Tmp, TmpLen);
       // TODO: Move to common code
+      // TODO: Use file id from ELF build id instead
       const auto filename_hash = XXH3_64bits(Tmp, TmpLen);
       const bool HasMultiblock = (Req->Header.Type == FEXServerClient::PacketType::TYPE_QUERY_CODE_MAP);
 
@@ -406,6 +655,7 @@ void HandleSocketData(fasio::tcp_socket& Socket) {
                                  FEXCore::ExecutableFileInfo {nullptr, filename_hash, (fextl::string)BinaryPath.string()}, !HasMultiblock),
                                Index++);
       } while (std::filesystem::exists(Filename));
+      // TODO: Add ".pending" to filename and make TYPE_QUERY_CODE_CACHE rename it once it has no more users
 
       std::filesystem::create_directories(CodeMapDirectory);
       auto CodeMapFD = open(Filename.c_str(), O_CREAT | O_CLOEXEC | O_WRONLY, 0644);
@@ -415,8 +665,6 @@ void HandleSocketData(fasio::tcp_socket& Socket) {
       fasio::error ec;
       write(Socket, Data, ec);
       buffer += sizeof(FEXServerClient::FEXServerRequestPacket::Header);
-      close(inFD);
-      inFD = -1;
       close(CodeMapFD);
       break;
     }
@@ -429,11 +677,6 @@ void HandleSocketData(fasio::tcp_socket& Socket) {
       close(Socket.FD);
       return;
     }
-  }
-
-  if (inFD != -1) {
-    LogMan::Msg::EFmt("Received unused FD argument");
-    close(inFD);
   }
 }
 

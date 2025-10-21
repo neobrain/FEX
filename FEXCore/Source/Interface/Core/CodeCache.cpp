@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: MIT
-#include <Interface/Context/Context.h>
+#include "FEXHeaderUtils/Filesystem.h"
+#include "Interface/Context/Context.h"
 
+#include <FEXCore/HLE/SyscallHandler.h>
 #include <FEXCore/HLE/SourcecodeResolver.h>
+#include <FEXCore/fextl/fmt.h>
 
-#include <FEXHeaderUtils/Filesystem.h>
+#include <Interface/GDBJIT/GDBJIT.h>
 
 #include <Common/FDUtils.h>
 
@@ -12,7 +15,7 @@
 #include <xxhash.h>
 
 namespace FEXCore {
-
+// TODO: Define elsewhere?
 ExecutableFileInfo::~ExecutableFileInfo() = default;
 
 fextl::string CodeMap::GetBaseFilename(const ExecutableFileInfo& MainExecutable, bool AddNombSuffix) {
@@ -148,31 +151,20 @@ void CodeMapWriter::AppendData(std::span<const std::byte> Data) {
 
 namespace FEXCore::Context {
 
-CodeCache::CodeCache(ContextImpl& CTX_)
-  : CTX(CTX_) {}
-CodeCache::~CodeCache() = default;
-
 uint64_t CodeCache::ComputeCodeMapId(int FD) {
   char Tmp[PATH_MAX];
   auto PathLength = FEX::get_fdpath(FD, Tmp);
   auto Filename = std::string_view(Tmp, PathLength);
 
-  if (Filename.empty()) {
-    return 0xffff'ffff'ffff'ffff;
+  std::string_view base_filename = FHU::Filesystem::GetFilename(Filename);
+  if (!base_filename.empty()) {
+    // TODO: Identify via ELF build id instead
+    auto filename_hash = XXH3_64bits(Filename.data(), Filename.size());
+
+    return filename_hash;
   }
 
-  // For now, we just use the file path as an identifier.
-  // TODO: Ensure the hash is unique enough to distinguish executables while remaining independent of the installation location
-  return XXH3_64bits(Filename.data(), Filename.size());
-}
-
-void CodeCache::LoadData(Core::InternalThreadState& Thread, std::byte* MappedCacheFile, const ExecutableFileSectionInfo& GuestRIPLookup) {
-  // TODO
-}
-
-bool CodeCache::SaveData(Core::InternalThreadState& Thread, int fd, const ExecutableFileSectionInfo& SourceBinary, uint64_t SerializedBaseAddress) {
-  // TODO
-  return true;
+  return 0xffff'ffff'ffff'ffff;
 }
 
 } // namespace FEXCore::Context

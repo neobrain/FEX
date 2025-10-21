@@ -166,8 +166,36 @@ VMATracking::VMACIterator VMATracking::FindVMAEntry(uint64_t GuestAddr) const {
 
 // Set or Replace mappings in a range with a new mapping
 void VMATracking::TrackVMARange(FEXCore::Context::Context* CTX, MappedResource* MappedResource, uintptr_t Base, uintptr_t Offset,
-                                uintptr_t Length, VMAFlags Flags, VMAProt Prot) {
+                                uintptr_t Length, VMAFlags Flags, VMAProt Prot, bool DelayedCacheLoad) {
   Mutex.check_lock_owned_by_self_as_write();
+
+// LogMan::Msg::EFmt("TrackVMARange {:#x}-{:#x}, {} {}", Base, Base + Length, fmt::ptr(MappedResource), DelayedCacheLoad);
+// Detect Wine special case
+// TODO: For Wine-on-Arm, check Wine's update_arm64ec_ranges in virtual.c
+#if 0
+  if (MappedResource && !MappedResource->FirstVMA) {
+    auto WineSpecialCase = VMAs.find(Base); // TODO: In principle, it could be connected to a preceding anonymous region...
+    if (WineSpecialCase != VMAs.end() && !WineSpecialCase->second.Resource) {
+      LogMan::Msg::EFmt("Detected wine special case at addr {:#x}-{:#x} {}", Base, Base + WineSpecialCase->second.Length, DelayedCacheLoad);
+      WineSpecialCase->second.Resource = MappedResource;
+      MappedResource->FirstVMA = &WineSpecialCase->second;
+      for (auto* VMA = MappedResource->FirstVMA; VMA; VMA = VMA->ResourceNextVMA) {
+        VMA->DelayedCacheLoad = DelayedCacheLoad;
+      }
+    }
+  } else if (MappedResource && MappedResource->FirstVMA) {
+    DelayedCacheLoad = MappedResource->FirstVMA->DelayedCacheLoad;
+  }
+  if (!MappedResource) {
+    auto WineSpecialCase = FindVMAEntry(Base);
+    // TODO: Refine these conditions
+    if (WineSpecialCase != VMAs.end() && WineSpecialCase->second.Resource && Offset == 0) {
+      // LogMan::Msg::EFmt("Detected wine special case 2 at addr {:#x}-{:#x} {}", Base, Base + WineSpecialCase->second.Length, DelayedCacheLoad);
+      MappedResource = WineSpecialCase->second.Resource;
+      // Offset = TODO?;
+    }
+  }
+#endif
 
   DeleteVMARange(CTX, Base, Length, MappedResource);
 
@@ -181,7 +209,8 @@ void VMATracking::TrackVMARange(FEXCore::Context::Context* CTX, MappedResource* 
     NextResVMA = PrevResVMA->ResourceNextVMA;
   }
 
-  auto [Iter, Inserted] = VMAs.emplace(Base, VMAEntry {MappedResource, PrevResVMA, NextResVMA, Base, Offset, Length, Flags, Prot});
+  auto [Iter, Inserted] =
+    VMAs.emplace(Base, VMAEntry {MappedResource, PrevResVMA, NextResVMA, Base, Offset, Length, Flags, Prot, DelayedCacheLoad});
 
   LOGMAN_THROW_A_FMT(Inserted == true, "VMA Tracking corruption");
 
@@ -253,8 +282,9 @@ void VMATracking::DeleteVMARange(FEXCore::Context::Context* CTX, uintptr_t Base,
         auto NewOffset = OffsetDiff + Top;
         auto NewLength = MapTop - Top;
 
-        auto [Iter, Inserted] = VMAs.emplace(Top, VMAEntry {Current->Resource, ReplaceAndErase ? Current->ResourcePrevVMA : Current,
-                                                            Current->ResourceNextVMA, Top, NewOffset, NewLength, Current->Flags, Current->Prot});
+        auto [Iter, Inserted] =
+          VMAs.emplace(Top, VMAEntry {Current->Resource, ReplaceAndErase ? Current->ResourcePrevVMA : Current, Current->ResourceNextVMA,
+                                      Top, NewOffset, NewLength, Current->Flags, Current->Prot, Current->DelayedCacheLoad});
         LOGMAN_THROW_A_FMT(Inserted == true, "VMA tracking error");
         auto TrailingPart = &Iter->second;
         if (Current->Resource) {
@@ -352,7 +382,8 @@ void VMATracking::ChangeProtectionFlags(uintptr_t Base, uintptr_t Length, VMAPro
                                                           .Offset = NewOffset,
                                                           .Length = NewLength,
                                                           .Flags = CurrentFlags,
-                                                          .Prot = CurrentProt});
+                                                          .Prot = CurrentProt,
+                                                          .DelayedCacheLoad = Current->DelayedCacheLoad});
 
       if (!Inserted) {
         // We can't recover from this.
@@ -425,7 +456,8 @@ void VMATracking::ChangeProtectionFlags(uintptr_t Base, uintptr_t Length, VMAPro
                                                         .Offset = NewOffset,
                                                         .Length = NewLength,
                                                         .Flags = CurrentFlags,
-                                                        .Prot = CurrentProt});
+                                                        .Prot = CurrentProt,
+                                                        .DelayedCacheLoad = Current->DelayedCacheLoad});
 
     if (!Inserted) [[unlikely]] {
       // We can't recover from this.
@@ -464,7 +496,8 @@ void VMATracking::ChangeProtectionFlags(uintptr_t Base, uintptr_t Length, VMAPro
                                                            .Offset = NewOffset,
                                                            .Length = NewLength,
                                                            .Flags = CurrentFlags,
-                                                           .Prot = NewProt});
+                                                           .Prot = NewProt,
+                                                           .DelayedCacheLoad = Current->DelayedCacheLoad});
 
       if (!Inserted) [[unlikely]] {
         // We can't recover from this.
@@ -492,7 +525,8 @@ void VMATracking::ChangeProtectionFlags(uintptr_t Base, uintptr_t Length, VMAPro
                                                           .Offset = NewOffset,
                                                           .Length = NewLength,
                                                           .Flags = CurrentFlags,
-                                                          .Prot = CurrentProt});
+                                                          .Prot = CurrentProt,
+                                                          .DelayedCacheLoad = Current->DelayedCacheLoad});
 
       if (!Inserted) {
         // We can't recover from this.

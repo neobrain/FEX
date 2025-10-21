@@ -71,16 +71,25 @@ public:
   ~CodeCache();
 
   ContextImpl& CTX;
+  fextl::unique_ptr<ContextImpl> ValidationCTX;
+  fextl::unique_ptr<Core::InternalThreadState> ValidationThread;
+  FEXCore::Core::CPUState::gdt_segment gdt[32] {};
   bool IsGeneratingCache = false;
 
   uint64_t ComputeCodeMapId(int FD) override;
-
   void LoadData(Core::InternalThreadState&, std::byte* MappedCacheFile, const ExecutableFileSectionInfo&) override;
   bool SaveData(Core::InternalThreadState&, int TargetFD, const ExecutableFileSectionInfo&, uint64_t SerializedBaseAddress) override;
 
   void InitiateCacheGeneration() override {
     IsGeneratingCache = true;
   }
+
+  // TODO: Docstring. Highlight difference between PE/ELF relocations and FEX relocations
+  // GuestDelta: Difference between the target guest base address and the guest base address the input code was compiled from.
+  // Returns true on success
+  [[nodiscard]]
+  bool ApplyCodeRelocations(uint64_t GuestDelta, std::span<std::byte> Code, std::span<const CPU::Relocation> Relocations, bool ForStorage,
+                            bool ExpectNopRelocation);
 };
 
 class ContextImpl final : public FEXCore::Context::Context, public CPU::CodeBufferManager {
@@ -165,6 +174,8 @@ public:
     return CodeInvalidationMutex;
   }
 
+
+  // TODO: Remove later
   void ConfigureAOTGen(FEXCore::Core::InternalThreadState* Thread, fextl::set<uint64_t>* ExternalBranches, uint64_t SectionMaxAddress) override;
 
   bool IsAddressInCodeBuffer(FEXCore::Core::InternalThreadState* Thread, uintptr_t Address) const override;

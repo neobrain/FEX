@@ -5,9 +5,9 @@
 #include <tuple>
 
 #include <FEXCore/fextl/map.h>
-#include <FEXCore/fextl/memory.h>
 #include <FEXCore/Utils/SignalScopeGuards.h>
 
+// TODO: Drop
 #include <elf.h>
 
 namespace FEX::HLE::VMATracking {
@@ -45,10 +45,13 @@ struct MappedResource {
 
   fextl::unique_ptr<FEXCore::ExecutableFileInfo> MappedFile;
   // Pointer to lowest memory range this file is mapped to
+  // TODO: Change to mapping that has offset 0?
   VMAEntry* FirstVMA;
-  uint64_t Length; // 0 if not fixed size
-  ContainerType::iterator Iterator;
+  uint64_t Length;                  // 0 if not fixed size
+  ContainerType::iterator Iterator; // TODO: Is this still needed?
 
+  bool Is64Bit;
+  // TODO: Be frontend-agnostic
   fextl::vector<Elf64_Phdr> ProgramHeaders;
 };
 
@@ -74,7 +77,7 @@ struct VMAEntry {
   MappedResource* Resource;
 
   // these are for intrusive linked list tracking, starting from Resource->FirstVMA and ordered by address
-  VMAEntry* ResourcePrevVMA;
+  VMAEntry* ResourcePrevVMA; // TODO: Not really needed...
   VMAEntry* ResourceNextVMA;
 
   uint64_t Base;
@@ -83,6 +86,8 @@ struct VMAEntry {
 
   VMAFlags Flags;
   VMAProt Prot;
+
+  bool DelayedCacheLoad = false; // If true, defer cache loading until an mprotect call
 };
 
 struct VMATracking {
@@ -103,7 +108,7 @@ struct VMATracking {
   // Primarily matches `mmap` semantics, but also used by `mremap`, and `shmat`, as they all can add new VMA ranges to be tracked.
   // - Mutex must be unique_locked before calling
   void TrackVMARange(FEXCore::Context::Context* Ctx, MappedResource* MappedResource, uintptr_t Base, uintptr_t Offset, uintptr_t Length,
-                     VMAFlags Flags, VMAProt Prot);
+                     VMAFlags Flags, VMAProt Prot, bool DelayedCacheLoad);
 
   // Deletes a VMA range provided from tracking.
   // Matches `munmap` semantics, and `mremap` with `MREMAP_DONTUNMAP` flag set.
@@ -123,6 +128,7 @@ struct VMATracking {
   uintptr_t DeleteSHMRegion(FEXCore::Context::Context* Ctx, uintptr_t Base);
 
   // Adds a new `MappedResource` to track.
+  // Used for `mmap` and `shmat` resources; Anonymous, FD, and SHM depending on flags.
   inline auto InsertMappedResource(const MRID& mrid, MappedResource Resource) {
     return MappedResources.emplace(mrid, std::move(Resource));
   }

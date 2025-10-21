@@ -33,6 +33,7 @@ $end_info$
 #include <FEXCore/Utils/Threads.h>
 #include <FEXCore/Utils/PrctlUtils.h>
 #include <FEXCore/Utils/Profiler.h>
+#include <FEXCore/Utils/StringUtils.h>
 #include <FEXCore/fextl/fmt.h>
 #include <FEXCore/fextl/memory.h>
 #include <FEXCore/fextl/sstream.h>
@@ -40,6 +41,9 @@ $end_info$
 #include <FEXCore/fextl/vector.h>
 #include <FEXHeaderUtils/Filesystem.h>
 #include <FEXHeaderUtils/StringArgumentParser.h>
+
+#include <range/v3/view/split.hpp>
+#include <range/v3/view/transform.hpp>
 
 #include <atomic>
 #include <cerrno>
@@ -501,8 +505,12 @@ int main(int argc, char** argv, char** const envp) {
     SyscallHandler->FM.TrackFEXFD(FEXServerLogging::FEXServerFD);
   }
 
+  // query ProgramFD now since MapMemory will close it
+  // TODO: Set O_CLOEXEC?
+  const int ProgramFD = dup(Loader.GetMainElfFD());
+
   {
-    Loader.SetVDSOBase(VDSOMapping.VDSOBase);
+    Loader.SetVDSOBase(VDSOMapping.VDSOBase); // TODO: Check interaction with disk caching?
     Loader.CalculateHWCaps(CTX.get());
 
     if (!Loader.MapMemory(SyscallHandler.get())) {
@@ -543,7 +551,21 @@ int main(int argc, char** argv, char** const envp) {
 
   SyscallHandler->DeserializeSeccompFD(ParentThread, FEXSeccompFD);
 
+  // Load AOT cache for all objects loaded previously
+  // NOTE: FetchAOTIRCacheEntry has a special case for addr == 0
+  FEX_CONFIG_OPT(Multiblock, MULTIBLOCK);
+
+  SyscallHandler->TriggerPostStartupCodeCacheLoad(*ParentThread->Thread);
+
+  FEX_CONFIG_OPT(SMCChecks, SMCCHECKS);
+  if (SMCChecks() != FEXCore::Config::CONFIG_SMC_NONE) {
+    // After having preloading the disk cache, ld.so will probably trigger this when applying ELF relocations
+    // ERROR_AND_DIE_FMT("TODO: SMC not supported at the moment");
+  }
+
   CTX->ExecuteThread(ParentThread->Thread);
+
+  LogMan::Msg::EFmt("Closing code dump FD");
 
   DebugServer.reset();
   SyscallHandler->TM.Stop();

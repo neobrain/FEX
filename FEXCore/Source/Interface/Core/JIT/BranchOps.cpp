@@ -43,8 +43,9 @@ DEF_OP(CallbackReturn) {
   ret();
 }
 
+// TODO: Apply relocations
 DEF_OP(ExitFunction) {
-  auto Op = IROp->C<IR::IROp_ExitFunction>();
+  const auto Op = IROp->C<IR::IROp_ExitFunction>(); // TODO: Check if making this "const" magically restores our ability to read the value in the debugger...
 
   ResetStack();
 

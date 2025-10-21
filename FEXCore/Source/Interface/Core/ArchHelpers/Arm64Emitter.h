@@ -105,9 +105,10 @@ constexpr ARMEmitter::PRegister PRED_TMP_32B = ARMEmitter::PReg::p7;
 // This class contains common emitter utility functions that can
 // be used by both Arm64 JIT and ARM64 Dispatcher
 class Arm64Emitter : public ARMEmitter::Emitter {
-protected:
+public:
   Arm64Emitter(FEXCore::Context::ContextImpl* ctx, void* EmissionPtr = nullptr, size_t size = 0);
 
+protected:
   FEXCore::Context::ContextImpl* EmitterCTX;
 
   std::span<const ARMEmitter::Register> StaticRegisters {};
@@ -117,8 +118,10 @@ protected:
   std::span<const ARMEmitter::VRegister> GeneralFPRegisters {};
   uint32_t PairRegisters = 0;
 
+public:
   void LoadConstant(ARMEmitter::Size s, ARMEmitter::Register Reg, uint64_t Constant, bool NOPPad = true);
 
+protected:
   void FillSpecialRegs(ARMEmitter::Register TmpReg, ARMEmitter::Register TmpReg2, bool SetFIZ, bool SetPredRegs);
 
   // Correlate an ARM register back to an x86 register index.

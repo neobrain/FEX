@@ -376,6 +376,38 @@ int RequestPIDFD(int ServerSocket) {
   return RequestPIDFDPacket(ServerSocket, PacketType::TYPE_GET_PID_FD);
 }
 
+int RequestCodeCache(int ServerSocket, int ProgramFD, bool HasMultiblock) {
+  fasio::tcp_socket Socket {ServerSocket};
+  FEXServerRequestPacket Req {
+    .Header {
+      .Type = HasMultiblock ? PacketType::TYPE_QUERY_CODE_CACHE : PacketType::TYPE_QUERY_CODE_CACHE_NO_MULTIBLOCK,
+    },
+  };
+
+  // Send request
+  fasio::error ec;
+  {
+    fasio::mutable_buffer WriteBuffer {std::as_writable_bytes(std::span {&Req, 1})};
+    WriteBuffer.FD = &ProgramFD;
+    write(Socket, WriteBuffer, ec);
+    if (ec != fasio::error::success) {
+      return -1;
+    }
+  }
+
+  // Wait for success response and cache FD
+  FEXServerResultPacket Res {};
+  fasio::mutable_buffer ResBuffer {std::as_writable_bytes(std::span {&Res, 1})};
+  int NewFD = -1;
+  ResBuffer.FD = &NewFD;
+  read(Socket, ResBuffer, ec);
+  if (ec != fasio::error::success || Res.Header.Type != PacketType::TYPE_SUCCESS) {
+    return -1;
+  }
+
+  return NewFD;
+}
+
 int RequestCodeMapFD(int ServerSocket, int ProgramFD, bool HasMultiblock) {
   fasio::tcp_socket Socket {ServerSocket};
   FEXServerRequestPacket Req {

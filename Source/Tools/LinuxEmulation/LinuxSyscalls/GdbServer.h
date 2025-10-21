@@ -21,6 +21,10 @@ $end_info$
 
 #include "LinuxSyscalls/SignalDelegator.h"
 
+namespace FEX::HLE {
+class SyscallHandler;
+}
+
 namespace FEX {
 
 class GdbServer {

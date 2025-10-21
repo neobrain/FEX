@@ -8,6 +8,7 @@ enum class RelocationTypes : uint8_t {
   // Aligned to struct RelocNamedSymbolLiteral
   RELOC_NAMED_SYMBOL_LITERAL,
 
+  // TODO: Comment
   RELOC_GUEST_RIP_LITERAL,
 
   // Fixed size named thunk move
@@ -36,12 +37,17 @@ struct RelocNamedSymbolLiteral final {
 
   NamedSymbol Symbol;
 
+  char pad : 6 {};
+
   // Offset in to the code section to begin the relocation
   uint64_t Offset {};
+
+  uint32_t pad2[8];
 };
 
 struct RelocGuestRIPLiteral final {
   RelocationTypeHeader Header {.Type = RelocationTypes::RELOC_GUEST_RIP_LITERAL};
+  char pad : 7 {};
 
   // Offset in to the code section to begin the relocation
   // TODO: Move to RelocationTypeHeader
@@ -49,6 +55,8 @@ struct RelocGuestRIPLiteral final {
 
   // The offset relative to the fragment entry point
   uint64_t GuestEntryOffset;
+
+  uint32_t pad2[6] {};
 };
 
 struct RelocNamedThunkMove final {
@@ -70,11 +78,14 @@ struct RelocGuestRIPMove final {
   // GPR index the constant is being moved to
   uint8_t RegisterIndex;
 
+  char pad : 6 {};
   // Offset in to the code section to begin the relocation
   uint64_t Offset {};
 
   // The unrelocated RIP that is being moved
   uint64_t GuestRIP;
+
+  uint32_t pad2[6] {};
 };
 
 union Relocation {
@@ -83,6 +94,7 @@ union Relocation {
   RelocNamedSymbolLiteral NamedSymbolLiteral;
   // This makes our union of relocations at least 48 bytes
   // It might be more efficient to not use a union
+  // TODO: Make structs packed to reduce overall size?
   RelocNamedThunkMove NamedThunkMove;
 
   RelocGuestRIPMove GuestRIPMove;

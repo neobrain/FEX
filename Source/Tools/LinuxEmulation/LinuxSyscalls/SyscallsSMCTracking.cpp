@@ -7,14 +7,18 @@ desc: SMC/MMan Tracking
 $end_info$
 */
 
+#include <Common/Config.h>
 #include "Common/FDUtils.h"
+#include "Common/FEXServerClient.h"
 #include "Common/FileMappingBaseAddress.h"
 
 #include <filesystem>
-#include <sys/shm.h>
+#include <sys/file.h>
 #include <sys/mman.h>
 #include <sys/personality.h>
+#include <sys/shm.h>
 
+#include "FEXCore/Utils/DebuggerPresence.h"
 #include "LinuxSyscalls/Syscalls.h"
 #include "LinuxSyscalls/SignalDelegator.h"
 
@@ -24,6 +28,7 @@ $end_info$
 #include <FEXCore/Utils/SignalScopeGuards.h>
 #include <FEXCore/Utils/TypeDefines.h>
 #include <Linux/Utils/ELFParser.h>
+#include <PEParser.h>
 
 namespace FEX::HLE {
 // SMC interactions
@@ -188,9 +193,29 @@ SyscallHandler::LookupExecutableFileSection(FEXCore::Core::InternalThreadState& 
   if (EntryIt == VMATracking.VMAs.end() || !EntryIt->second.Resource || !EntryIt->second.Resource->MappedFile) {
     return std::nullopt;
   }
-
   auto& [MappingBaseAddr, Entry] = *EntryIt;
-  return FEXCore::ExecutableFileSectionInfo {*Entry.Resource->MappedFile, Entry.Resource->FirstVMA->Base};
+  return FEXCore::ExecutableFileSectionInfo {*Entry.Resource->MappedFile, Entry.Resource->FirstVMA->Base, (uintptr_t)MappingBaseAddr,
+                                             (uintptr_t)MappingBaseAddr + (uintptr_t)Entry.Length};
+}
+
+void SyscallHandler::TriggerPostStartupCodeCacheLoad(FEXCore::Core::InternalThreadState& Thread) {
+  FEX_CONFIG_OPT(Multiblock, MULTIBLOCK);
+  for (auto& [BaseAddr, FileInfo, BinaryFD] : StartupBinaryLoads) {
+    // TODO: Minimize number of calls to RequestCodeCache?
+    const auto CacheFD = FEXServerClient::RequestCodeCache(FEXServerClient::GetServerFD(), BinaryFD, Multiblock());
+    struct stat buf;
+    if (CacheFD == -1 || (fstat(CacheFD, &buf) != 0)) {
+      continue;
+    }
+    const auto CacheFileSize = buf.st_size;
+    const auto MappedCache = (std::byte*)FEXCore::Allocator::mmap(nullptr, CacheFileSize, PROT_READ, MAP_PRIVATE, CacheFD, 0);
+
+    auto Entry = LookupExecutableFileSection(Thread, BaseAddr);
+    CTX->GetCodeCache().LoadData(Thread, MappedCache, *Entry);
+
+    FEXCore::Allocator::munmap(MappedCache, CacheFileSize);
+  }
+  StartupBinaryLoads.clear();
 }
 
 FEXCore::HLE::ExecutableRangeInfo SyscallHandler::QueryGuestExecutableRange(FEXCore::Core::InternalThreadState* Thread, uint64_t Address) {
@@ -205,7 +230,9 @@ FEXCore::HLE::ExecutableRangeInfo SyscallHandler::QueryGuestExecutableRange(FEXC
   return {Entry->first, Entry->second.Length, Entry->second.Prot.Writable};
 }
 
-static fextl::vector<Elf64_Phdr> ReadELFHeaders(int FD, std::span<std::byte> HeaderData = {}) {
+// TODO: Rename to something like ReadBinaryHeaders
+static std::pair<bool, fextl::vector<Elf64_Phdr>> ReadELFHeaders(int FD, std::span<std::byte> HeaderData = {}) {
+#if 0 // TODO: Also check PE magic, then re-enable this code
   std::string_view ELFMagic = ELFMAG;
   if (HeaderData.data()) {
     if (HeaderData.size_bytes() < ELFMagic.size() || std::memcmp(ELFMagic.data(), HeaderData.data(), ELFMagic.size()) != 0) {
@@ -215,10 +242,34 @@ static fextl::vector<Elf64_Phdr> ReadELFHeaders(int FD, std::span<std::byte> Hea
   } else {
     // Read from FD in case the caller didn't have a mapped header available
   }
+#endif
+
+  // TODO: Is it safe to modify the FD's read cursor here?
+  // TODO: Actually, the file is already mapped into memory, so we don't need to use the fd!
+  auto dupfd = dup(FD);
+  auto pos = lseek(dupfd, 0, SEEK_CUR);
+  {
+    // Check if this is a PE binary first
+    PEParser Parser(dupfd);
+    if (Parser) {
+      fextl::vector<Elf64_Phdr> ElfSections;
+      ElfSections.push_back({.p_offset = 0, .p_vaddr = Parser.ImageBase, .p_filesz = 0x1000 /* TODO: use size of headers? */});
+      for (auto& Section : Parser.Sections) {
+        // Convert to elf header
+        Elf64_Phdr ElfSection {};
+        ElfSection.p_offset = Section.PointerToRawData;
+        ElfSection.p_vaddr = Parser.ImageBase + Section.VirtualAddress;
+        ElfSection.p_filesz = Section.SizeOfRawData;
+        ElfSections.push_back(ElfSection);
+      }
+      return std::pair {Parser.Is64Bit, std::move(ElfSections)};
+    }
+  };
 
   ELFParser Parser;
-  Parser.ReadElf(dup(FD));
-  return std::move(Parser.phdrs);
+  Parser.ReadElf(dupfd);
+  lseek(dupfd, pos, SEEK_SET); // TODO: Is this needed? Actually, dupfd is most likely an invalid FD at this point!!!!
+  return std::pair {Parser.ehdr.e_machine != EM_386, std::move(Parser.phdrs)};
 }
 
 void* SyscallHandler::GuestMmap(bool Is64Bit, FEXCore::Core::InternalThreadState* Thread, void* addr, size_t length, int prot, int flags,
@@ -227,6 +278,9 @@ void* SyscallHandler::GuestMmap(bool Is64Bit, FEXCore::Core::InternalThreadState
 
   uint64_t Result {};
   size_t Size = FEXCore::AlignUp(length, FEXCore::Utils::FEX_PAGE_SIZE);
+
+  FEXCore::ExecutableFileInfo* Entry;
+  // ELFParser Elf;
 
   {
     // NOTE: Frontend calls this with a nullptr Thread during initialization, but
@@ -248,10 +302,29 @@ void* SyscallHandler::GuestMmap(bool Is64Bit, FEXCore::Core::InternalThreadState
       }
     }
 
-    TrackMmap(Thread, Result, length, prot, flags, fd, offset);
+    Entry = TrackMmap(Thread, Result, length, prot, flags, fd, offset);
   }
 
   InvalidateCodeRangeIfNecessary(Thread, Result, Size);
+
+  if (Entry) {
+    auto CacheFilename = fextl::fmt::format("{}cache/{}-{:016x}", FEX::Config::GetCacheDirectory(),
+                                            FEXCore::CodeMap::GetBaseFilename(*Entry, false), CodeCacheConfigId);
+    int FD = open(CacheFilename.c_str(), O_RDONLY);
+    struct stat buf;
+    if (FD != -1 && (fstat(FD, &buf) == 0)) {
+      auto CacheFileSize = buf.st_size;
+      auto MappedCache = (std::byte*)FEXCore::Allocator::mmap(nullptr, CacheFileSize, PROT_READ, MAP_PRIVATE, FD, 0);
+      close(FD);
+
+      // TODO: Make TrackMmap return this instead
+      auto SectionInfo = LookupExecutableFileSection(*Thread, Result);
+      CTX->GetCodeCache().LoadData(*Thread, MappedCache, *SectionInfo);
+
+      FEXCore::Allocator::munmap(MappedCache, CacheFileSize);
+    }
+  }
+
   return reinterpret_cast<void*>(Result);
 }
 
@@ -324,6 +397,41 @@ uint64_t SyscallHandler::GuestMprotect(FEXCore::Core::InternalThreadState* Threa
   }
 
   InvalidateCodeRangeIfNecessary(Thread, reinterpret_cast<uint64_t>(addr), len);
+
+  // Handle Wine case
+  if (prot & PROT_EXEC) {
+    // TODO: Iterate until len
+    auto VMAEntry = VMATracking.FindVMAEntry(reinterpret_cast<uint64_t>(addr));
+    if (VMAEntry != VMATracking.VMAs.end() && VMAEntry->second.Resource && VMAEntry->second.DelayedCacheLoad) {
+      for (auto* VMA = VMAEntry->second.Resource->FirstVMA; VMA; VMA = VMA->ResourceNextVMA) {
+        if (VMA->Prot.Executable && VMA->DelayedCacheLoad) {
+          LogMan::Msg::IFmt("TRIGGERING DELAYED CACHE LOAD FOR WINE ON VMA ENTRY {:#x}-{:#x}", VMA->Base, VMA->Base + VMA->Length);
+          // CTX->FetchAOTIRCacheEntry(Thread, reinterpret_cast<uint64_t>(VMA->Base));
+
+          // TODO: Actually, use main info and use VMA bounds...
+          auto SectionInfo = LookupExecutableFileSection(*Thread, VMA->Base);
+          if (SectionInfo) {
+            auto CacheFilename = fextl::fmt::format("{}cache/{}-{:016x}", FEX::Config::GetCacheDirectory(),
+                                                    FEXCore::CodeMap::GetBaseFilename(SectionInfo->FileInfo, false), CodeCacheConfigId);
+            int FD = open(CacheFilename.c_str(), O_RDONLY);
+            struct stat buf;
+            if (FD != -1 && (fstat(FD, &buf) == 0)) {
+              auto CacheFileSize = buf.st_size;
+              auto MappedCache = (std::byte*)FEXCore::Allocator::mmap(nullptr, CacheFileSize, PROT_READ, MAP_PRIVATE, FD, 0);
+              close(FD);
+
+              CTX->GetCodeCache().LoadData(*Thread, MappedCache, *SectionInfo);
+
+              FEXCore::Allocator::munmap(MappedCache, CacheFileSize);
+            }
+          }
+
+          // VMA->DelayedCacheLoad = false;
+        }
+      }
+    }
+  }
+
   return Result;
 }
 
@@ -385,11 +493,32 @@ uint64_t SyscallHandler::GuestShmdt(bool Is64Bit, FEXCore::Core::InternalThreadS
 }
 
 // MMan Tracking
-void SyscallHandler::TrackMmap(FEXCore::Core::InternalThreadState* Thread, uint64_t addr, size_t length, int prot, int flags, int fd, off_t offset) {
+FEXCore::ExecutableFileInfo* SyscallHandler::TrackMmap(FEXCore::Core::InternalThreadState* Thread, uint64_t addr, size_t length, int prot,
+                                                       int flags, int fd, off_t offset) {
+  const auto UnalignedSize = length;
+
   size_t Size = FEXCore::AlignUp(length, FEXCore::Utils::FEX_PAGE_SIZE);
   const auto ProtMapping = VMATracking::VMAProt::fromProt(prot);
 
+  // Wine maps executables differently from normal Linux applications (see map_image_into_view in Wine's virtual.c):
+  // * Anonymous memory is mmap'ed for the entire application
+  // * The PE header is mmap'ed onto this range with PROT_EXEC
+  // * The remaining PE sections are each mapped onto this range, however mmap will fail for unaligned PE sections
+  //   * As a fallback, Wine will copy the file contents manually on the anonymous range
+  // TODO: Actually, regular Linux applications also allocate anonymous memory for the entire application... so our VMATracking "WineCase" actually hits those as well.
+  bool WineCase = false;
+
   VMATracking::MappedResource* Resource = nullptr;
+
+  if ((flags & (MAP_ANONYMOUS | MAP_FIXED)) == MAP_FIXED && (prot & PROT_EXEC) && UnalignedSize <= 4096) {
+    // Detect mmap of PE_HEADER
+    auto VMAEntry = VMATracking.FindVMAEntry(addr);
+    if (VMAEntry != VMATracking.VMAs.end() &&
+        VMAEntry->first == addr /* TODO: Technically the range could have been merged with another one... */ && !VMAEntry->second.Resource) {
+      // fmt::print(stderr, "Detected PE header mmap at address {:#x}\n", addr);
+      // WineCase = true;
+    }
+  }
 
   if (!(flags & MAP_ANONYMOUS)) {
     struct stat64 buf;
@@ -405,7 +534,7 @@ void SyscallHandler::TrackMmap(FEXCore::Core::InternalThreadState* Thread, uint6
     const bool MappedELFHeaderAgain = ResourceIt != ResourceEnd && offset == 0 && !ResourceIt->second.ProgramHeaders.empty();
     if (ResourceIt == ResourceEnd || MappedELFHeaderAgain) {
       // Create a new MappedResource for previously unseen file and for re-mappings of an ELF header
-      ResourceIt = VMATracking.InsertMappedResource(mrid, {nullptr, nullptr, 0});
+      ResourceIt = VMATracking.InsertMappedResource(mrid, VMATracking::MappedResource {nullptr, nullptr, 0, {}, {}});
       ResourceIt->second.Iterator = ResourceIt;
       Inserted = true;
     }
@@ -426,7 +555,7 @@ void SyscallHandler::TrackMmap(FEXCore::Core::InternalThreadState* Thread, uint6
         CheckForElfFile = true;
 #endif
         if (CheckForElfFile) {
-          Resource->ProgramHeaders = ReadELFHeaders(fd, std::span {reinterpret_cast<std::byte*>(addr), length});
+          std::tie(Resource->Is64Bit, Resource->ProgramHeaders) = ReadELFHeaders(fd, std::span {reinterpret_cast<std::byte*>(addr), length});
           LOGMAN_THROW_A_FMT(Resource->ProgramHeaders.empty() || offset == 0, "Expected file offset 0 for the first mapping of an ELF "
                                                                               "file");
         }
@@ -453,12 +582,48 @@ void SyscallHandler::TrackMmap(FEXCore::Core::InternalThreadState* Thread, uint6
     auto [Iter, IterEnd] = VMATracking.FindResources(mrid);
     LOGMAN_THROW_A_FMT(Iter == IterEnd, "VMA tracking error");
 
-    Iter = VMATracking.InsertMappedResource(mrid, {nullptr, nullptr, 0});
+    Iter = VMATracking.InsertMappedResource(mrid, VMATracking::MappedResource {nullptr, nullptr, 0, {}, {}});
     Resource = &Iter->second;
     Resource->Iterator = Iter;
   }
 
-  VMATracking.TrackVMARange(CTX, Resource, addr, offset, Size, VMATracking::VMAFlags::fromFlags(flags), VMATracking::VMAProt::fromProt(prot));
+  // if (Resource && Resource->ProgramHeaders.empty() && VMATracking::VMAProt::fromProt(prot).Executable) {
+  //   std::tie(Resource->Is64Bit, Resource->ProgramHeaders) = ReadELFHeaders(fd);
+  // }
+
+  VMATracking.TrackVMARange(CTX, Resource, addr, offset, Size, VMATracking::VMAFlags::fromFlags(flags),
+                            VMATracking::VMAProt::fromProt(prot), VMATracking::VMAProt::fromProt(prot).Executable && WineCase);
+
+  // Load cache when the first executable mapping is loaded.
+  // Some important use cases to consider:
+  // - Mapping a non-executable file won't trigger search for code cache files
+  // - Celeste loads gameoverlayrenderer.so as read-only at first and then as executable at a different base location
+  // - Libraries may be mapped as read-only before being mprotect'ed as executable
+  // - During God of War launch, steam.exe's steam.exe.so will unmap one page from its `.init` section
+  // - A plugin-like library may be reloaded to a different base address throughout program execution
+  // TODO: Reload the cache if the same library is reloaded to a different address!
+  // TODO: Ensure mprotect is properly handled as well
+  // TODO: Move parts of this back inside the lock!
+  // TODO: .Executable heuristic doesn't work well with Windows executables, for which even the header is mapped like this (adding an extra "WineHeuristic", but that's not ideal!)
+  if (Resource && VMATracking::VMAProt::fromProt(prot).Executable) {
+    // LogMan::Msg::IFmt("LOADING AOT CACHE ENTRY: {}", Resource->MappedFile->Filename);
+
+    if (Thread) {
+      // TODO: Move this to first compile?
+      if (!WineCase) {
+        return Resource->MappedFile.get();
+      } else {
+        // Delayed until mprotect
+        LogMan::Msg::IFmt("Delaying code cache load for {} until mprotect {:#x}-{:#x}", Resource->MappedFile->Filename, addr, addr + Size);
+      }
+    } else {
+      // Delay loading this entry until FEX is fully initialized
+      StartupBinaryLoads.push_back({addr, Resource->MappedFile.get(), dup(fd)});
+      LogMan::Msg::IFmt("Queuing post-startup code cache load for {}", Resource->MappedFile->Filename);
+    }
+  }
+
+  return nullptr;
 }
 
 void SyscallHandler::TrackMunmap(FEXCore::Core::InternalThreadState* Thread, void* addr, size_t length) {
@@ -491,7 +656,7 @@ void SyscallHandler::TrackMremap(FEXCore::Core::InternalThreadState* Thread, uin
     // must be a shared mapping
     LOGMAN_THROW_A_FMT(OldResource != nullptr, "VMA Tracking error");
     LOGMAN_THROW_A_FMT(OldFlags.Shared, "VMA Tracking error");
-    VMATracking.TrackVMARange(CTX, OldResource, NewAddress, OldOffset, NewSize, OldFlags, OldProt);
+    VMATracking.TrackVMARange(CTX, OldResource, NewAddress, OldOffset, NewSize, OldFlags, OldProt, false);
   } else {
 
 #ifndef MREMAP_DONTUNMAP
@@ -503,7 +668,7 @@ void SyscallHandler::TrackMremap(FEXCore::Core::InternalThreadState* Thread, uin
     }
 
     // Make anonymous mapping
-    VMATracking.TrackVMARange(CTX, OldResource, NewAddress, OldOffset, NewSize, OldFlags, OldProt);
+    VMATracking.TrackVMARange(CTX, OldResource, NewAddress, OldOffset, NewSize, OldFlags, OldProt, false);
   }
 }
 
@@ -512,11 +677,12 @@ void SyscallHandler::TrackShmat(FEXCore::Core::InternalThreadState* Thread, int 
 
   auto [Iter, IterEnd] = VMATracking.FindResources(mrid);
   if (Iter == IterEnd) {
-    Iter = VMATracking.InsertMappedResource(mrid, {nullptr, nullptr, Length});
+    Iter = VMATracking.InsertMappedResource(mrid, VMATracking::MappedResource {nullptr, nullptr, Length, {}, {}});
     Iter->second.Iterator = Iter;
   }
   auto Resource = &Iter->second;
-  VMATracking.TrackVMARange(CTX, Resource, shmaddr, 0, Length, VMATracking::VMAFlags::fromFlags(MAP_SHARED), VMATracking::VMAProt::fromSHM(shmflg));
+  VMATracking.TrackVMARange(CTX, Resource, shmaddr, 0, Length, VMATracking::VMAFlags::fromFlags(MAP_SHARED),
+                            VMATracking::VMAProt::fromSHM(shmflg), false);
 }
 
 uint64_t SyscallHandler::TrackShmdt(FEXCore::Core::InternalThreadState* Thread, uint64_t shmaddr) {

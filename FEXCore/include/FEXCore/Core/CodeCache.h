@@ -10,8 +10,8 @@
 #include <atomic>
 #include <cstdint>
 #include <mutex>
-#include <shared_mutex>
 #include <span>
+#include <shared_mutex>
 
 namespace FEXCore {
 
@@ -37,7 +37,14 @@ struct ExecutableFileSectionInfo {
   ExecutableFileInfo& FileInfo;
 
   // Start address that the file is mapped to.
+  // NOTE: Since executable files may be mapped multiple times, this can depend on the queried section.
   uintptr_t FileStartVA;
+
+  // Start address of the section mapping
+  uintptr_t BeginVA;
+
+  // End address that of the section mapping
+  uintptr_t EndVA;
 };
 
 using CodeMapFileId = uint64_t;
@@ -141,8 +148,6 @@ private:
 
 class AbstractCodeCache {
 public:
-  virtual ~AbstractCodeCache() = default;
-
   /**
    * Computes a unique identifier for the referenced binary file to be used for
    * generating the code map.
