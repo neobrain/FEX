@@ -551,8 +551,8 @@ FEXCore::ExecutableFileInfo* SyscallHandler::TrackMmap(FEXCore::Core::InternalTh
     }
     Resource = &ResourceIt->second;
 
-    // Only handle FDs that are backed by regular files that are executable
-    if (PathLength != -1 && S_ISREG(buf.st_mode) && (buf.st_mode & S_IXUSR)) {
+    // Only handle FDs that are backed by regular files
+    if (PathLength != -1 && S_ISREG(buf.st_mode)) {
       // ELF files that are mapped multiple times get a separate MappedResource for each base virtual address
       if (Inserted) {
         Resource->MappedFile = fextl::make_unique<FEXCore::ExecutableFileInfo>();
