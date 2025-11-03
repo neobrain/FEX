@@ -164,34 +164,31 @@ VMATracking::VMACIterator VMATracking::FindVMAEntry(uint64_t GuestAddr) const {
   return VMAs.end();
 }
 
+void VMATracking::TrackPEHeader(uint64_t Base, MappedResource* MappedResource) {
+  for (auto& Header : MappedResource->ProgramHeaders) {
+    uint64_t MappingBase = Base + (Header.p_vaddr - MappedResource->ProgramHeaders.begin()->p_vaddr);
+    PEMappingToBase.emplace(MappingBase, MappedResource);
+  }
+}
+
 // Set or Replace mappings in a range with a new mapping
 void VMATracking::TrackVMARange(FEXCore::Context::Context* CTX, MappedResource* MappedResource, uintptr_t Base, uintptr_t Offset,
                                 uintptr_t Length, VMAFlags Flags, VMAProt Prot, bool DelayedCacheLoad) {
   Mutex.check_lock_owned_by_self_as_write();
 
-// LogMan::Msg::EFmt("TrackVMARange {:#x}-{:#x}, {} {}", Base, Base + Length, fmt::ptr(MappedResource), DelayedCacheLoad);
-// Detect Wine special case
-// TODO: For Wine-on-Arm, check Wine's update_arm64ec_ranges in virtual.c
-  if (MappedResource && !MappedResource->FirstVMA) {
-    auto WineSpecialCase = VMAs.find(Base); // TODO: In principle, it could be connected to a preceding anonymous region...
-    if (WineSpecialCase != VMAs.end() && !WineSpecialCase->second.Resource) {
-      LogMan::Msg::EFmt("Detected wine special case at addr {:#x}-{:#x} {}", Base, Base + WineSpecialCase->second.Length, DelayedCacheLoad);
-      WineSpecialCase->second.Resource = MappedResource;
-      MappedResource->FirstVMA = &WineSpecialCase->second;
-      for (auto* VMA = MappedResource->FirstVMA; VMA; VMA = VMA->ResourceNextVMA) {
-        VMA->DelayedCacheLoad = DelayedCacheLoad;
-      }
-    }
-  } else if (MappedResource && MappedResource->FirstVMA) {
-    DelayedCacheLoad = MappedResource->FirstVMA->DelayedCacheLoad;
-  }
+  // Under certain common conditions, Wine loads PE files the following way:
+  // - memory for the whole file is reserved (without linking it to a MappedResource)
+  // - the PE header is mapped into the reserved memory region
+  // - the remaining PE sections are *loaded* (not mapped!) into the reserved memory region
+  //
+  // When this pattern is detected, we treat the PE section mappings as if they were linked
+  // to the MappedResource. This allows us to reliably delay cache loading until Wine has
+  // finished PE loading.
   if (!MappedResource) {
-    auto WineSpecialCase = FindVMAEntry(Base);
-    // TODO: Refine these conditions
-    if (WineSpecialCase != VMAs.end() && WineSpecialCase->second.Resource && Offset == 0) {
-      // LogMan::Msg::EFmt("Detected wine special case 2 at addr {:#x}-{:#x} {}", Base, Base + WineSpecialCase->second.Length, DelayedCacheLoad);
-      MappedResource = WineSpecialCase->second.Resource;
-      // Offset = TODO?;
+    if (auto PEMappingBase = PEMappingToBase.find(Base); PEMappingBase != PEMappingToBase.end()) {
+      DelayedCacheLoad = PEMappingBase->second->FirstVMA->DelayedCacheLoad;
+      MappedResource = PEMappingBase->second->FirstVMA->Resource;
+      LogMan::Msg::EFmt("Detected PE mapping, marking addr range {:#x}-{:#x} as {}", Base, Base + Length, DelayedCacheLoad ? "delayed" : "instant");
     }
   }
 
@@ -224,6 +221,15 @@ void VMATracking::TrackVMARange(FEXCore::Context::Context* CTX, MappedResource* 
 // freeing their associated MappedResource unless it is equal to PreservedMappedResource
 void VMATracking::DeleteVMARange(FEXCore::Context::Context* CTX, uintptr_t Base, uintptr_t Length, MappedResource* PreservedMappedResource) {
   Mutex.check_lock_owned_by_self_as_write();
+
+  // Remove any anticipated PE sections
+  if (auto Entry = FindVMAEntry(Base); Entry != VMAs.end() && Entry->second.Resource) {
+    auto* Resource = Entry->second.Resource;
+    for (auto& Header : Resource->ProgramHeaders) {
+      uint64_t MappingBase = Base + (Header.p_vaddr - Resource->ProgramHeaders.begin()->p_vaddr);
+      PEMappingToBase.erase(MappingBase);
+    }
+  }
 
   const auto Top = Base + Length;
 

@@ -97,6 +97,12 @@ struct VMATracking {
   // Memory ranges indexed by page aligned starting address
   fextl::map<uint64_t, VMAEntry> VMAs;
 
+  // This tracks anticipated mapping base addresses on a partially mapped PE file.
+  // Each entry maps the mapping base address to the MappedResource.
+  fextl::map<uint64_t, MappedResource*> PEMappingToBase;
+
+  void TrackPEHeader(uint64_t Base, MappedResource* MappedResource);
+
   using VMACIterator = decltype(VMAs)::const_iterator;
 
   // Find a VMA entry associated with the memory address.

@@ -608,6 +608,10 @@ FEXCore::ExecutableFileInfo* SyscallHandler::TrackMmap(FEXCore::Core::InternalTh
   VMATracking.TrackVMARange(CTX, Resource, addr, offset, Size, VMATracking::VMAFlags::fromFlags(flags),
                             VMATracking::VMAProt::fromProt(prot), VMATracking::VMAProt::fromProt(prot).Executable && WineCase);
 
+  if (WineCase) {
+    VMATracking.TrackPEHeader(addr, Resource);
+  }
+
   // Load cache when the first executable mapping is loaded.
   // Some important use cases to consider:
   // - Mapping a non-executable file won't trigger search for code cache files
