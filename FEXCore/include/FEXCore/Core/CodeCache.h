@@ -65,16 +65,29 @@ struct CodeMap {
     // - WINE/: Path to Wine/Proton installation
     // - WINEPREFIX/: Path to Wine/Proton prefix
     // - SLR/: Path to Steam Linux Runtime
-    // At runtime, FEX will always dump absolute paths.
+    // At runtime, FEX will always dump absolute paths
+    // TODO: WoA may also dump paths in Windows format (C:\Windows\system32\...)
     char Path[];
     // Followed by padding to a 4 byte boundary
   };
 
+  // Followed by ExternalLibraryInfo
   static constexpr Entry LoadExternalLibrary = {0xffff'ffff'ffff'ffff, 0xffff'ffff};
+
+  struct FEX_PACKED SetExecutableFileId {
+    Entry Marker = {0xffff'ffff'ffff'ffff, 0xffff'fffe};
+    CodeMapFileId ExecutableFileId;
+  };
+  // TODO: Add this entry to mark sanitized CodeMaps at file start?
+  // static constexpr Entry MarkSanitized = {0xffff'ffff'ffff'ffff, 0xffff'fffe};
+  // Properties:
+  // - All ExternalLibraryInfo entries pulled to the front of the file
+  // - All other entries are sorted by FileId and then by BlockOffset
 
   struct ParsedContents {
     fextl::string Filename;
     fextl::set<uint64_t> Blocks;
+    bool IsExecutable = false;
   };
 
   // Follows scheme fileid[-nomb]
@@ -86,6 +99,7 @@ struct CodeMap {
 
 class CodeMapWriter {
 public:
+  // TODO: x86 Wine will need a way to switch main executables
   CodeMapWriter();
   virtual ~CodeMapWriter() = default;
 
@@ -94,6 +108,7 @@ public:
 
   void AppendBlock(const FEXCore::ExecutableFileSectionInfo&, uint64_t Entry);
   void AppendLibraryLoad(const FEXCore::ExecutableFileInfo&);
+  void AppendSetMainExecutable(const FEXCore::ExecutableFileInfo&);
 
   // Returns a lower bound of the number of pending bytes that will be written on the next call to Flush().
   // This number isn't exact, but it can be used to decide when to trigger asynchronous flushes.

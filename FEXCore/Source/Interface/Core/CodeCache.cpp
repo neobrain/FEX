@@ -50,6 +50,13 @@ fextl::map<CodeMapFileId, CodeMap::ParsedContents> CodeMap::ParseCodeMap(std::if
       }
       Ret[Info.ExternalFileId].Filename = std::move(Filename);
       // TODO: Check for conflict if a previous entry already existed?
+    } else if (Entry.FileId == SetExecutableFileId {}.Marker.FileId && Entry.BlockOffset == SetExecutableFileId {}.Marker.BlockOffset) {
+      CodeMapFileId ExecutableFileId;
+      File.read(reinterpret_cast<char*>(&ExecutableFileId), sizeof(ExecutableFileId));
+      if (!File) {
+        break;
+      }
+      Ret[ExecutableFileId].IsExecutable = true;
     } else {
       if (!Ret.contains(Entry.FileId)) {
         LogMan::Msg::EFmt("Code map referenced unknown file id {:016x}", Entry.FileId);
@@ -117,6 +124,11 @@ void CodeMapWriter::AppendLibraryLoad(const FEXCore::ExecutableFileInfo& FileInf
   WritePtr = std::copy(FileInfo.Filename.begin(), FileInfo.Filename.end(), WritePtr);
   std::fill(WritePtr, Data + TotalSize, 0);
   AppendData(std::as_bytes(std::span {Data, TotalSize}));
+}
+
+void CodeMapWriter::AppendSetMainExecutable(const FEXCore::ExecutableFileInfo& FileInfo) {
+  CodeMap::SetExecutableFileId Data {.ExecutableFileId = FileInfo.FileId};
+  AppendData(std::span {reinterpret_cast<const std::byte*>(&Data), sizeof(Data)});
 }
 
 void CodeMapWriter::AppendData(std::span<const std::byte> Data) {
