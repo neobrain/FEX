@@ -7,8 +7,6 @@ tags: glue|driver
 desc: Glues Frontend, OpDispatcher and IR Opts & Compilation, LookupCache, Dispatcher and provides the Execution loop entrypoint
 $end_info$
 */
-#include "FEXCore/Utils/DebuggerPresence.h"
-
 #include <cstdint>
 #include "Interface/Core/ArchHelpers/Arm64Emitter.h"
 #include "Interface/Core/LookupCache.h"
@@ -1164,6 +1162,8 @@ void ContextImpl::MonoBackpatcherWrite(FEXCore::Core::CpuStateFrame* Frame, uint
 void CodeCache::LoadData(Core::InternalThreadState& Thread, std::byte* MappedCacheFile, const ExecutableFileSectionInfo& GuestRIPLookup) {
   auto Lock = std::unique_lock {CTX.CodeBufferWriteMutex};
 
+  FEXCORE_PROFILE_SCOPED("Load code cache");
+
   {
     LogMan::Msg::IFmt("LoadAll of {} to VA base {:#x}: {:016x} ({:#x}-{:#x})", GuestRIPLookup.FileInfo.Filename, GuestRIPLookup.FileStartVA,
                       GuestRIPLookup.FileInfo.FileId, GuestRIPLookup.BeginVA, GuestRIPLookup.EndVA);
@@ -1438,9 +1438,6 @@ void CodeCache::LoadData(Core::InternalThreadState& Thread, std::byte* MappedCac
                 fextl::stringstream ss;
                 FEXCore::IR::Dump(&ss, &*IRView);
                 LogMan::Msg::EFmt("IR ({}):\n{}", ValidationCTX->Config.Is64BitMode(), ss.str());
-              }
-              while (!FEXCore::IsDebuggerAttached()) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(50));
               }
               ERROR_AND_DIE_FMT("Bla");
             }

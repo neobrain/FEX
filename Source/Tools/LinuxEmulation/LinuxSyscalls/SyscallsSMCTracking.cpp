@@ -18,7 +18,6 @@ $end_info$
 #include <sys/personality.h>
 #include <sys/shm.h>
 
-#include "FEXCore/Utils/DebuggerPresence.h"
 #include "LinuxSyscalls/Syscalls.h"
 #include "LinuxSyscalls/SignalDelegator.h"
 

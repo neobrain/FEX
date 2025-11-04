@@ -12,7 +12,6 @@ $end_info$
 */
 
 #include "Common/FDUtils.h"
-#include "FEXCore/Utils/DebuggerPresence.h"
 #include "Interface/Context/Context.h"
 #include "Interface/Core/LookupCache.h"
 #include "Interface/Core/Dispatcher/Dispatcher.h"
@@ -1166,6 +1165,8 @@ CPUBackend::CompiledCode Arm64JITCore::CompileCode(uint64_t Entry, uint64_t Size
     LogMan::Msg::IFmt("Disassemble End");
   }
 #endif
+
+  CurrentCodeBuffer->UsedSize = GetCursorOffset();
 
   DebugData->HostCodeSize = CodeData.Size;
   DebugData->Relocations = &Relocations;

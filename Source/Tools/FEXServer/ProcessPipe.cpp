@@ -2,8 +2,10 @@
 #include <CodeMapWriterSingleThreaded.h>
 #include "FEXHeaderUtils/Syscalls.h"
 #include "Logger.h"
+#include "PortabilityInfo.h"
 #include "SquashFS.h"
 
+#include <Common/ArgumentLoader.h>
 #include <Common/AsyncNet.h>
 #include <Common/Config.h>
 #include <Common/FEXServerClient.h>
@@ -66,6 +68,7 @@ constexpr size_t static MAX_FD_DISTANCE = 32;
 rlimit MaxFDs {};
 std::atomic<size_t> NumFilesOpened {};
 
+static std::string FEXOfflineCompilerPath;
 static std::string CodeMapDirectory;
 
 struct ClientData {
@@ -336,7 +339,7 @@ int32_t EmbedSubprocess(const char* path, char* const* args) {
 
 static int RunOfflineCompiler(const char* Config, const char* CodeMap) {
   const char* ExecveArgs[] = {"FEXOfflineCompiler", "generate", "--config", Config, "--codemap", CodeMap, nullptr};
-  return EmbedSubprocess("FEXOfflineCompiler", const_cast<char* const*>(&ExecveArgs[0]));
+  return EmbedSubprocess(FEXOfflineCompilerPath.c_str(), const_cast<char* const*>(&ExecveArgs[0]));
 };
 
 void HandleSocketData(fasio::tcp_socket& Socket, ClientData& ClientData) {
@@ -755,6 +758,7 @@ void SetConfiguration(bool Foreground, uint32_t PersistentTimeout) {
   ProcessPipe::Foreground = Foreground;
   ProcessPipe::RequestTimeout = PersistentTimeout;
 
+  FEXOfflineCompilerPath = FEX::GetSelfPath().value() + "/FEXOfflineCompiler";
   CodeMapDirectory = FEX::Config::GetCacheDirectory() + "codemap";
 }
 

@@ -799,7 +799,11 @@ SyscallHandler::SyscallHandler(FEXCore::Context::Context* _CTX, FEX::HLE::Signal
     using EntryType = std::pair<FEXCore::Config::ConfigOption, uint32_t>; // TODO: A uint16-uint16 pair is sufficient!
     fextl::vector<EntryType> LoadedConfig;
     auto SetConfig = [&]<typename Type>(FEXCore::Config::ConfigOption Option) {
-      // TODO: Skip options not relevant for caching; consider including relevant options that are set to their defaults
+      // TODO: Skip all options not relevant for caching; consider including relevant options that are set to their defaults
+      if (Option == FEXCore::Config::CONFIG_APP_FILENAME || Option == FEXCore::Config::CONFIG_APP_CONFIG_NAME ||
+          Option == FEXCore::Config::CONFIG_HIDEHYPERVISORBIT) {
+        return;
+      }
 
       if constexpr (std::is_same_v<fextl::string, Type>) {
         if (auto Val = FEXCore::Config::Get(Option); Val) {

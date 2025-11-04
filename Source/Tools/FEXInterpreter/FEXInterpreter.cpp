@@ -412,7 +412,7 @@ int main(int argc, char** argv, char** const envp) {
     {
       char ExistsTempPath[PATH_MAX];
       char* RealPath = realpath(Program.ProgramPath.c_str(), ExistsTempPath);
-      fmt::print(stderr, "NAME: realpath {} -> {}\n", Program.ProgramPath, RealPath ? RealPath : "");
+      // fmt::print(stderr, "NAME: realpath {} -> {}\n", Program.ProgramPath, RealPath ? RealPath : "");
       if (!RealPath && Program.ProgramPath.starts_with('/')) {
         RealPath = realpath((LDPath() + '/' + Program.ProgramPath).c_str(), ExistsTempPath);
       }

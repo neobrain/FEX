@@ -44,6 +44,8 @@ namespace CPU {
   struct CodeBuffer {
     uint8_t* Ptr;
     size_t Size;
+    // TODO: Only for profiling
+    size_t UsedSize = 0;
 
     fextl::unique_ptr<GuestToHostMap> LookupCache;
 
