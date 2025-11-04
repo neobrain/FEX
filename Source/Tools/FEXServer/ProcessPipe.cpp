@@ -578,6 +578,16 @@ void HandleSocketData(fasio::tcp_socket& Socket) {
                 OutputCodeMap.AppendBlock(FEXCore::ExecutableFileSectionInfo {FileInfo, 0}, Block);
               }
             }
+
+            // Export Fossilize database
+            // TODO: Re-enable
+            if (false) {
+              auto MergedFilename = fmt::format("{}/merged.{}", CodeMapDirectory, BinaryName);
+              auto MergedFozFilename = MergedFilename + ".foz";
+              const char* ExecveArgs[] = {"FEXOfflineCompiler",      "to-foz", MergedFilename.c_str(), "--output",
+                                          MergedFozFilename.c_str(), nullptr};
+              EmbedSubprocess("FEXOfflineCompiler", const_cast<char* const*>(&ExecveArgs[0]));
+            }
           }
         }
 

@@ -182,6 +182,74 @@ int CombineCodeMaps(int argc, const char** argv) {
   return 0;
 }
 
+int CodeMapToFossilize(int argc, const char** argv) {
+  optparse::OptionParser Parser {};
+  Parser.add_option("--output").help("Output filename for Fossilize database (.foz)");
+
+  optparse::Values Options = Parser.parse_args(argc, argv);
+  auto Input = Parser.args();
+  if (Input.size() != 1) {
+    Parser.print_usage();
+    return EXIT_FAILURE;
+  }
+
+  if (!Options.is_set("output")) {
+    fmt::print("{}: error: Output not specified (--output)\n", argv[0]);
+    return EXIT_FAILURE;
+  }
+
+  std::map<FileIdWithPath, fextl::set<uintptr_t>> CodeMaps;
+
+  {
+    std::ifstream Codemap(Input.front().c_str(), std::ios_base::binary);
+    if (!Codemap) {
+      fmt::print("Could not open {}\n", Input);
+      return EXIT_FAILURE;
+    }
+
+    auto NewCodeMap = ParseCodeMap(Codemap, nullptr);
+    for (auto& [Filename, Blocks] : NewCodeMap) {
+      auto& TargetBlocks =
+        CodeMaps.emplace(std::piecewise_construct, std::forward_as_tuple(nullptr, Filename.FileId, Filename.Filename), std::tuple {}).first->second;
+      TargetBlocks.merge(std::move(Blocks));
+    }
+  }
+
+  if (CodeMaps.size() > 1) {
+    fmt::print("Cannot export multi-file code map. Use FEX's auto-split code maps instead.\n");
+    return EXIT_FAILURE;
+  }
+
+  std::ofstream Output(Options.get("output"), std::ios_base::binary);
+  if (!Output) {
+    fmt::print("Could not open {} for writing\n", (std::string)Options.get("output"));
+    return EXIT_FAILURE;
+  }
+  Output << fmt::format("{}FOSSILIZEDB\0\0\0\6", '\x81') << std::flush;
+  for (auto& [File, Blocks] : CodeMaps) {
+    // First, record application info: Tag (RESOURCE_APPLICATION_INFO = 0) + null hash
+    Output << fmt::format("{:024x}{:016x}", 0, 0) << std::flush;
+    // TODO: Encode FileId as well
+    auto payload = R"({"version":6,"applicationInfo":{"applicationName":")" + File.Filename + R"("},"physicalDeviceFeatures":{}})";
+    uint32_t payload_size = payload.size();
+    Output.write(reinterpret_cast<const char*>(&payload_size), sizeof(payload_size));
+    // flags = 1 (uncompressed), no CRC
+    Output << fmt::format("\1\0\0\0\0\0\0\0");
+    Output.write(reinterpret_cast<const char*>(&payload_size), sizeof(payload_size));
+    Output << payload;
+
+    // Second, record block offsets
+    for (auto& Block : Blocks) {
+      // Tag (RESOURCE_FEX_CODE_MAP_ENTRY = 10) + block offset ("hash")
+      // Empty payload, flags = 1 (uncompressed), no CRC
+      Output << fmt::format("{:024x}{:016x}\0\0\0\0\1\0\0\0\0\0\0\0\0\0\0\0", 10, Block);
+    }
+    break;
+  }
+
+  return 0;
+}
+
 int GenerateCache(int argc, const char** argv) {
   optparse::OptionParser Parser {};
   Parser.add_option("--codemap").help("Path to code map");
@@ -477,6 +545,8 @@ int main(int argc, char** argv) {
     return CombineCodeMaps(argc - 1, Args.data());
   } else if (argc >= 2 && argv[1] == std::string_view {"generate"}) {
     return GenerateCache(argc - 1, Args.data());
+  } else if (argc >= 2 && argv[1] == std::string_view {"to-foz"}) {
+    return CodeMapToFossilize(argc - 1, Args.data());
   } else {
     fmt::print("Usage: {} <command>\n\n", basename(argv[0]));
     fmt::print("Commands:\n");
