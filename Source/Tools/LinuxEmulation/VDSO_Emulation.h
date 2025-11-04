@@ -8,7 +8,7 @@
 #include <span>
 
 namespace FEX::HLE {
-class SyscallHandler;
+class SyscallMmapInterface;
 }
 
 namespace FEX::VDSO {
@@ -17,13 +17,19 @@ struct VDSOMapping {
   size_t VDSOSize {};
   void* OptionalSigReturnMapping {};
   size_t OptionalMappingSize {};
+
+  explicit operator bool() const {
+    return VDSOBase != nullptr;
+  }
 };
 
 struct VDSOSigReturn {
   void* VDSO_kernel_sigreturn;
   void* VDSO_kernel_rt_sigreturn;
 };
-VDSOMapping LoadVDSOThunks(bool Is64Bit, FEX::HLE::SyscallHandler* const Handler);
+int OpenVDSOGuestLibraryFD(bool Is64Bit);
+VDSOMapping PrepareVDSO(bool Is64Bit, FEX::HLE::SyscallMmapInterface* const);
+void FinalizeVDSO(VDSOMapping& Mapping, bool Is64Bit, FEX::HLE::SyscallMmapInterface* const);
 void UnloadVDSOMapping(const VDSOMapping& Mapping);
 
 uint64_t GetVSyscallEntry(const void* VDSOBase);

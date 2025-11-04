@@ -483,7 +483,14 @@ int main(int argc, char** argv, char** const envp) {
                           FEX::HLE::x32::CreateHandler(CTX.get(), SignalDelegation.get(), ThunkHandler.get(), std::move(Allocator));
 
   // Load VDSO in to memory prior to mapping our ELFs.
-  auto VDSOMapping = FEX::VDSO::LoadVDSOThunks(Loader.Is64BitMode(), SyscallHandler.get());
+  auto VDSOMapping = std::invoke([&]() {
+    auto Mapping = FEX::VDSO::PrepareVDSO(Loader.Is64BitMode(), SyscallHandler.get());
+    if (Mapping) {
+      auto lock = FEXCore::GuardSignalDeferringSectionWithFallback(SyscallHandler->VMATracking.Mutex, nullptr);
+      FEX::VDSO::FinalizeVDSO(Mapping, Loader.Is64BitMode(), SyscallHandler.get());
+    }
+    return Mapping;
+  });
 
   // Now that we have the syscall handler. Track some FDs that are FEX owned.
   if (OutputFD > 2) {

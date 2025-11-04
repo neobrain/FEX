@@ -659,7 +659,7 @@ void LoadGuestVDSOSymbols(bool Is64Bit, char* VDSOBase) {
   }
 }
 
-void LoadUnique32BitSigreturn(VDSOMapping* Mapping, FEX::HLE::SyscallHandler* const Handler) {
+void LoadUnique32BitSigreturn(VDSOMapping* Mapping, FEX::HLE::SyscallMmapInterface* const Handler) {
   // Hardcoded to one page for now
   auto PageSize = sysconf(_SC_PAGESIZE);
   PageSize = PageSize > 0 ? PageSize : FEXCore::Utils::FEX_PAGE_SIZE;
@@ -722,7 +722,6 @@ void LoadUnique32BitSigreturn(VDSOMapping* Mapping, FEX::HLE::SyscallHandler* co
 
   mprotect(Mapping->OptionalSigReturnMapping, Mapping->OptionalMappingSize, PROT_READ | PROT_EXEC);
   {
-    auto lk = FEXCore::GuardSignalDeferringSectionWithFallback(Handler->VMATracking.Mutex, nullptr);
     FEX::HLE::_SyscallHandler->TrackMmap(nullptr, reinterpret_cast<uint64_t>(Mapping->OptionalSigReturnMapping),
                                          Mapping->OptionalMappingSize, PROT_READ | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
   }
@@ -741,17 +740,20 @@ void UnloadVDSOMapping(const VDSOMapping& Mapping) {
   }
 }
 
-VDSOMapping LoadVDSOThunks(bool Is64Bit, FEX::HLE::SyscallHandler* const Handler) {
-  VDSOMapping Mapping {};
+int OpenVDSOGuestLibraryFD(bool Is64Bit) {
   FEX_CONFIG_OPT(ThunkGuestLibs, THUNKGUESTLIBS);
   fextl::string ThunkGuestPath = ThunkGuestLibs();
   while (ThunkGuestPath.ends_with('/')) {
     ThunkGuestPath.pop_back();
   }
   ThunkGuestPath = fextl::fmt::format("{}{}/libVDSO-guest.so", ThunkGuestPath, Is64Bit ? "" : "_32");
-  // Load VDSO if we can
-  int VDSOFD = ::open(ThunkGuestPath.c_str(), O_RDONLY);
+  return ::open(ThunkGuestPath.c_str(), O_RDONLY);
+}
 
+VDSOMapping PrepareVDSO(bool Is64Bit, FEX::HLE::SyscallMmapInterface* const Handler) {
+  VDSOMapping Mapping {};
+  return Mapping; // TODO: Re-enable
+  int VDSOFD = OpenVDSOGuestLibraryFD(Is64Bit);
   if (VDSOFD != -1) {
     // Get file size
     Mapping.VDSOSize = lseek(VDSOFD, 0, SEEK_END);
@@ -771,6 +773,10 @@ VDSOMapping LoadVDSOThunks(bool Is64Bit, FEX::HLE::SyscallHandler* const Handler
     LoadGuestVDSOSymbols(Is64Bit, reinterpret_cast<char*>(Mapping.VDSOBase));
   }
 
+  return Mapping;
+}
+
+void FinalizeVDSO(VDSOMapping& Mapping, bool Is64Bit, FEX::HLE::SyscallMmapInterface* const Handler) {
   if (!Is64Bit && (!VDSOPointers.VDSO_kernel_sigreturn || !VDSOPointers.VDSO_kernel_rt_sigreturn)) {
     // If VDSO couldn't find sigreturn then FEX needs to provide unique implementations.
     LoadUnique32BitSigreturn(&Mapping, Handler);
@@ -795,8 +801,6 @@ VDSOMapping LoadVDSOThunks(bool Is64Bit, FEX::HLE::SyscallHandler* const Handler
     VDSODefinitions[5].ThunkFunction = FEX::VDSO::x32::Handler_getcpu;
     // getrandom doesn't exist on 32-bit, so leave VDSODefinitions[6] unfilled
   }
-
-  return Mapping;
 }
 
 uint64_t GetVSyscallEntry(const void* VDSOBase) {
