@@ -18,6 +18,16 @@ namespace FEXCore {
 // TODO: Define elsewhere?
 ExecutableFileInfo::~ExecutableFileInfo() = default;
 
+// TODO: Move to common code...
+uint64_t AbstractCodeCache::ComputeConfigId(std::span<std::byte> Data) {
+
+  // TODO: Also encode HostFeatures
+
+  // TODO: Hash only used data instead of all 4096 bytes
+
+  return XXH3_64bits(Data.data(), Data.size_bytes());
+}
+
 fextl::string CodeMap::GetBaseFilename(const ExecutableFileInfo& MainExecutable, bool AddNombSuffix) {
   auto FileId = MainExecutable.FileId;
 

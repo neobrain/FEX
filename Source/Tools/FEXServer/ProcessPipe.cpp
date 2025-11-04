@@ -70,6 +70,8 @@ static std::string CodeMapDirectory;
 
 struct ClientData {
   int PID;
+  std::string ConfigFilename = fmt::format("/FEXConfig_{}", PID);
+  std::optional<uint64_t> CacheConfigHash;
 };
 // Maps connection FD to associated client data
 static std::unordered_map<int, ClientData> Clients;
@@ -274,6 +276,7 @@ bool InitializeServerSocket(bool abstract) {
       [Socket = std::move(Socket).value()](fasio::error ec) mutable {
         if (ec != fasio::error::success) {
           close(Socket.FD);
+          shm_unlink(Clients.at(Socket.FD).ConfigFilename.c_str());
           Clients.erase(Socket.FD);
           return fasio::post_callback::drop;
         }
@@ -331,12 +334,12 @@ int32_t EmbedSubprocess(const char* path, char* const* args) {
   return -1;
 }
 
-static int RunOfflineCompiler(const char* CodeMap) {
-  const char* ExecveArgs[] = {"FEXOfflineCompiler", "generate", "--codemap", CodeMap, nullptr};
+static int RunOfflineCompiler(const char* Config, const char* CodeMap) {
+  const char* ExecveArgs[] = {"FEXOfflineCompiler", "generate", "--config", Config, "--codemap", CodeMap, nullptr};
   return EmbedSubprocess("FEXOfflineCompiler", const_cast<char* const*>(&ExecveArgs[0]));
 };
 
-void HandleSocketData(fasio::tcp_socket& Socket, ClientData&) {
+void HandleSocketData(fasio::tcp_socket& Socket, ClientData& ClientData) {
   std::vector<uint8_t> Data(1500);
 
   // Get the current number of FDs of the process before we start handling sockets.
@@ -450,6 +453,16 @@ void HandleSocketData(fasio::tcp_socket& Socket, ClientData&) {
 
     case FEXServerClient::PacketType::TYPE_QUERY_CODE_CACHE:
     case FEXServerClient::PacketType::TYPE_QUERY_CODE_CACHE_NO_MULTIBLOCK: {
+      if (!ClientData.CacheConfigHash) {
+        auto ConfigMemFD = shm_open(ClientData.ConfigFilename.c_str(), O_RDONLY, S_IRWXU | S_IRWXG | S_IRWXO);
+        auto ConfigMem = ::mmap(nullptr, 4096, PROT_READ, MAP_SHARED, ConfigMemFD, 0);
+        // TODO: Handle errors
+        // TODO: Use common code
+        ClientData.CacheConfigHash = XXH3_64bits(ConfigMem, 4096);
+        close(ConfigMemFD);
+        fmt::println("Computed client code cache config id: {:#x}", *ClientData.CacheConfigHash);
+      }
+
       char Tmp[PATH_MAX];
       int TmpLen = FEX::get_fdpath(inFD, Tmp);
       assert(TmpLen != -1);
@@ -506,10 +519,10 @@ void HandleSocketData(fasio::tcp_socket& Socket, ClientData&) {
         return Ret;
       };
 
-      auto GetCacheFilename = [](const FileIdWithPath& FileId) {
+      auto GetCacheFilename = [&ClientData](const FileIdWithPath& FileId) {
         return fmt::format("{}cache/{}-{:016x}", FEX::Config::GetCacheDirectory(),
                            FEXCore::CodeMap::GetBaseFilename(FEXCore::ExecutableFileInfo {nullptr, FileId.FileId, FileId.Filename}, false),
-                           0 /* TODO: Use unique cache id */);
+                           *ClientData.CacheConfigHash);
       };
       auto CodeCacheId = GetCacheFilename(MainFileId);
 
@@ -622,7 +635,7 @@ void HandleSocketData(fasio::tcp_socket& Socket, ClientData&) {
           const auto BinaryName =
             (std::string)FEXCore::CodeMap::GetBaseFilename(FEXCore::ExecutableFileInfo {nullptr, File.FileId, File.Filename}, !HasMultiblock);
           fmt::println("Generating cache for merged.{}", BinaryName);
-          int Status = RunOfflineCompiler(fmt::format("{}/merged.{}", CodeMapDirectory, BinaryName).c_str());
+          int Status = RunOfflineCompiler(ClientData.ConfigFilename.c_str(), fmt::format("{}/merged.{}", CodeMapDirectory, BinaryName).c_str());
           if (Status != 0) {
             fmt::println("ERROR: Cache generation failed with status {}", Status);
           }

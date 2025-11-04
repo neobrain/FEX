@@ -325,7 +325,7 @@ public:
   // Each entry consists of the VMA mapping start, a reference to the mapped file, and a file descriptor
   fextl::vector<std::tuple<uint64_t, FEXCore::ExecutableFileInfo*, int>> StartupBinaryLoads;
 
-  const uint64_t CodeCacheConfigId = 0; // TODO: Make unique to active configuration
+  uint64_t CodeCacheConfigId;
 
   uint64_t read_ldt(FEXCore::Core::CpuStateFrame* Frame, void* ptr, unsigned long bytecount);
   uint64_t write_ldt(FEXCore::Core::CpuStateFrame* Frame, void* ptr, unsigned long bytecount, bool legacy);

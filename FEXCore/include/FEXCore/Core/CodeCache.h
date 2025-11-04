@@ -172,6 +172,8 @@ public:
    * Function to be called before compiling any code for caching purposes
    */
   virtual void InitiateCacheGeneration() = 0;
+
+  static uint64_t ComputeConfigId(std::span<std::byte> Data);
 };
 
 } // namespace FEXCore

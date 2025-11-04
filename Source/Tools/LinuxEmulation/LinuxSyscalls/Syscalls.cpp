@@ -778,6 +778,57 @@ SyscallHandler::SyscallHandler(FEXCore::Context::Context* _CTX, FEX::HLE::Signal
   if (SignalDelegation) {
     SignalDelegation->RegisterHostSignalHandler(SIGSEGV, HandleSegfault, true);
   }
+
+  auto ConfigMemFD = shm_open(fmt::format("/FEXConfig_{}", ::getpid()).c_str(), O_CREAT | O_TRUNC | O_RDWR, S_IRWXU | S_IRWXG | S_IRWXO);
+  if (ftruncate(ConfigMemFD, 4096) == -1) {
+    // ...
+  }
+  auto Data = std::span {reinterpret_cast<std::byte*>(::mmap(nullptr, sizeof(4096), PROT_READ | PROT_WRITE, MAP_SHARED, ConfigMemFD, 0)), 4096};
+  close(ConfigMemFD);
+
+  {
+    std::fill(std::begin(Data), std::end(Data), std::byte {0});
+
+    auto WritePtr = Data.begin();
+
+    auto& ItemsOffset = *new (&*WritePtr) size_t;
+    WritePtr += sizeof(size_t);
+    auto& NumItems = *new (&*WritePtr) size_t;
+    WritePtr += sizeof(size_t);
+
+    using EntryType = std::pair<FEXCore::Config::ConfigOption, uint32_t>; // TODO: A uint16-uint16 pair is sufficient!
+    fextl::vector<EntryType> LoadedConfig;
+    auto SetConfig = [&]<typename Type>(FEXCore::Config::ConfigOption Option) {
+      // TODO: Skip options not relevant for caching; consider including relevant options that are set to their defaults
+
+      if constexpr (std::is_same_v<fextl::string, Type>) {
+        if (auto Val = FEXCore::Config::Get(Option); Val) {
+          LoadedConfig.push_back({Option, WritePtr - Data.begin()});
+          auto DataPtr = reinterpret_cast<std::byte*>((*Val)->data());
+          WritePtr = std::copy_n(DataPtr, (*Val)->size() + 1, WritePtr);
+        }
+      } else if (auto Val = FEXCore::Config::GetConv<Type>(Option); Val) {
+        LoadedConfig.push_back({Option, WritePtr - Data.begin()});
+        auto CharPtr = reinterpret_cast<char*>(&*WritePtr);
+        // Using unary plus here is important to format boolean values as 0/1 instead of false/true
+        WritePtr += fmt::format_to(CharPtr, "{}{}", +*Val, '\0') - CharPtr;
+      }
+    };
+#define OPT_BASE(type, group, enum, json, default) SetConfig.template operator()<type>(FEXCore::Config::CONFIG_##enum);
+#include <FEXCore/Config/ConfigValues.inl>
+
+    NumItems = LoadedConfig.size();
+    WritePtr = Data.begin() + FEXCore::AlignUp(WritePtr - Data.begin(), alignof(EntryType));
+    auto EntryData = new (&*WritePtr) EntryType[NumItems];
+    WritePtr += sizeof(EntryType) * NumItems;
+    std::ranges::copy(LoadedConfig, EntryData);
+    ItemsOffset = reinterpret_cast<std::byte*>(EntryData) - Data.data();
+    if (ItemsOffset + sizeof(EntryType) * NumItems > Data.size_bytes()) {
+      ERROR_AND_DIE_FMT("Failed to encode configuration in shared memory");
+    }
+  }
+
+  CodeCacheConfigId = FEXCore::AbstractCodeCache::ComputeConfigId(std::as_writable_bytes(std::span {Data}));
 }
 
 SyscallHandler::~SyscallHandler() {

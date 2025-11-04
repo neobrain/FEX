@@ -252,6 +252,7 @@ int CodeMapToFossilize(int argc, const char** argv) {
 
 int GenerateCache(int argc, const char** argv) {
   optparse::OptionParser Parser {};
+  Parser.add_option("--config").help("Path to encoded FEX configuration");
   Parser.add_option("--codemap").help("Path to code map");
   Parser.add_option("--limit").action("store_true").help("Limit processing to the given binary");
   Parser.add_option("--outdir").set_default(FEX::Config::GetCacheDirectory() + "cache").help("Output directory for generated cache files");
@@ -325,11 +326,40 @@ int GenerateCache(int argc, const char** argv) {
 
   // TODO: Support compiling from an FD
 
-  uint64_t CodeCacheConfigId = 0; // TODO: Make unique to active configuration
-  const auto PortableInfo = FEX::ReadPortabilityInformation();
-  char* envp[] = {nullptr};
-  FEX::Config::LoadConfig("", envp, PortableInfo);
-  // TODO: Also load app config
+  uint64_t CodeCacheConfigId = 0;
+  if (Options.is_set("config")) {
+    // TODO: Initialize config more cleanly...
+    // TODO: Is this actually still needed?
+    const auto PortableInfo = FEX::ReadPortabilityInformation();
+    char* envp[] = {nullptr};
+    FEX::Config::LoadConfig("", envp, PortableInfo);
+
+    auto ConfigMemFD = shm_open(Options.get("config"), O_RDONLY, S_IRWXU | S_IRWXG | S_IRWXO);
+    if (ConfigMemFD == -1) {
+      // TODO
+    }
+
+    auto ConfigMem = reinterpret_cast<std::byte*>(::mmap(nullptr, 4096, PROT_READ, MAP_SHARED, ConfigMemFD, 0));
+
+    auto DataOffset = reinterpret_cast<size_t*>(ConfigMem)[0];
+    auto NumItems = reinterpret_cast<size_t*>(ConfigMem)[1];
+    auto LoadedConfig = std::span {reinterpret_cast<std::pair<FEXCore::Config::ConfigOption, uint32_t>*>(ConfigMem + DataOffset), NumItems};
+    for (auto& [Option, ValueOffset] : LoadedConfig) {
+      const char* Value = reinterpret_cast<const char*>(ConfigMem + ValueOffset);
+      FEXCore::Config::Set(Option, Value);
+    }
+
+    CodeCacheConfigId = FEXCore::AbstractCodeCache::ComputeConfigId(std::span {ConfigMem, 4096});
+  } else {
+    fmt::print("Warning: Called FEXOfflineCompiler without --config. This should be used for debugging, only.\n");
+
+    // Fall back to reading default configuration
+    const auto PortableInfo = FEX::ReadPortabilityInformation();
+    char* envp[] = {nullptr};
+    FEX::Config::LoadConfig("", envp, PortableInfo);
+
+    // TODO: Generate cache key
+  }
 
   bool Is64Bit;
   bool LoadedFromPE = false;
@@ -371,6 +401,7 @@ int GenerateCache(int argc, const char** argv) {
 
   // Load HostFeatures
   // This can be customized via Config.json
+  // TODO: Read from shm via Config. Keep in mind that the fallback requires CONFIG_IS64BIT_MODE to be set up
   auto HostFeatures = FEX::FetchHostFeatures();
 
   // TODO: Verify the file exists
