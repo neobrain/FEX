@@ -400,7 +400,8 @@ int RequestCodeCache(int ServerSocket, int ProgramFD, bool HasMultiblock) {
   fasio::mutable_buffer ResBuffer {std::as_writable_bytes(std::span {&Res, 1})};
   int NewFD = -1;
   ResBuffer.FD = &NewFD;
-  read(Socket, ResBuffer, ec);
+  // read(Socket, ResBuffer, ec);
+  Socket.read_some(ResBuffer, ec);
   if (ec != fasio::error::success || Res.Header.Type != PacketType::TYPE_SUCCESS) {
     return -1;
   }
