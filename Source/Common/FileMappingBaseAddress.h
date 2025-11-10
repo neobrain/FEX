@@ -2,9 +2,9 @@
 #pragma once
 
 #include <FEXCore/Utils/TypeDefines.h>
+#include <FEXCore/fextl/vector.h>
 
 #include <cstdint>
-#include <optional>
 #include <span>
 
 #include <elf.h>
@@ -19,8 +19,11 @@ namespace FEXCore {
  * mapping (file offset = 0). Instead, this function searches the corresponding ELF program headers
  * for an entry that generated the given file mapping.
  */
-inline std::optional<uint64_t> InferMappingBaseAddress(std::span<const Elf64_Phdr> ProgramHeaders, uint64_t Addr, uint64_t Size,
+// TODO: Add unit test for Firefox's glxtest
+inline fextl::vector<uint64_t>
+InferMappingBaseAddress(std::span<const Elf64_Phdr> ProgramHeaders, uint64_t Addr, uint64_t Size,
                                                        uint64_t FileOffset, int AccessFlags, bool IsWine = false) {
+  fextl::vector<uint64_t> Ret;
   for (auto& phdr : ProgramHeaders) {
     if (phdr.p_type != PT_LOAD) {
       // Skip headers that don't trigger memory mappings
@@ -42,11 +45,11 @@ inline std::optional<uint64_t> InferMappingBaseAddress(std::span<const Elf64_Phd
     if (FileOffset >= SegmentStartOffset && FileOffset < SegmentStartOffset + phdr.p_filesz &&
         (FileOffset & Utils::FEX_PAGE_MASK) == (phdr.p_offset & Utils::FEX_PAGE_MASK)) {
       // Compute VA offset relative to the base mapping
-      return Addr - (phdr.p_vaddr - (phdr.p_offset & 0xfff)) + (ProgramHeaders[0].p_vaddr - (ProgramHeaders[0].p_offset & 0xfff)) -
-             (FileOffset - SegmentStartOffset);
+      Ret.push_back(Addr - (phdr.p_vaddr - (phdr.p_offset & 0xfff)) + (ProgramHeaders[0].p_vaddr - (ProgramHeaders[0].p_offset & 0xfff)) -
+                    (FileOffset - SegmentStartOffset));
     }
   }
 
-  return std::nullopt;
+  return Ret;
 }
 } // namespace FEXCore

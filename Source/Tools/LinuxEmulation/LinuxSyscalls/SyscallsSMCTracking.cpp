@@ -530,7 +530,8 @@ FEXCore::ExecutableFileInfo* SyscallHandler::TrackMmap(FEXCore::Core::InternalTh
     }
   }
 
-  if (!(flags & MAP_ANONYMOUS)) {
+  // Qt creator's run file maps a read-only part of itself manually
+  if (!(flags & MAP_ANONYMOUS) && !((flags & MAP_SHARED) && !ProtMapping.Executable)) {
     struct stat64 buf;
     fstat64(fd, &buf);
 
@@ -578,12 +579,12 @@ FEXCore::ExecutableFileInfo* SyscallHandler::TrackMmap(FEXCore::Core::InternalTh
         ResourceIt = std::find_if(ResourceIt, ResourceEnd, [&](const VMATracking::MappedResource::ContainerType::value_type& ResourcePair) {
           auto& Resource = ResourcePair.second;
           auto ProtFlags = VMATracking::VMAProt::fromProt(prot); // TODO: Move to BinParser?
-          auto ExpectedBase = FEXCore::InferMappingBaseAddress(
+          auto ExpectedBases = FEXCore::InferMappingBaseAddress(
             Resource.ProgramHeaders, addr, Size, offset,
             +(ProtFlags.Executable ? PF_X : 0) | (ProtFlags.Writable ? PF_W : 0) | (ProtFlags.Readable ? PF_R : 0),
             *(char*)(Resource.FirstVMA->Base) == 'M' /* TODO: Properly detect PE */);
 
-          return ExpectedBase == Resource.FirstVMA->Base;
+          return std::ranges::find(ExpectedBases, Resource.FirstVMA->Base) != ExpectedBases.end();
         });
         LOGMAN_THROW_A_FMT(ResourceIt != ResourceEnd, "ERROR: Could not find base for file mapping at {:#x} (offset {:#x})", addr, offset);
         Resource = &ResourceIt->second;
