@@ -11,6 +11,7 @@
 #include <Common/FDUtils.h>
 
 #include <fstream>
+#include <thread>
 
 #include <xxhash.h>
 
@@ -148,8 +149,24 @@ void CodeMapWriter::AppendData(std::span<const std::byte> Data) {
   std::shared_lock Lock {Mutex};
   auto Offset = BufferOffset.fetch_add(Data.size_bytes());
   if (Offset + Data.size_bytes() > Buffer.size()) {
+    // Acquire exclusive lock and flush the buffer.
+    // Under heavy pressure, multiple threads may observe an exhausted buffer simultaneously.
+    // The thread with the last in-bounds Offset is responsible for flushing the buffer.
     Lock.unlock();
-    Flush(Offset);
+    bool IsResponsibleForFlush = false;
+    {
+      std::unique_lock ExclusiveLock {Mutex};
+      IsResponsibleForFlush = (Offset <= Buffer.size());
+      if (IsResponsibleForFlush) {
+        Flush(Offset, ExclusiveLock);
+      }
+    }
+    if (!IsResponsibleForFlush) {
+      // Wait for the buffer to be flushed on the responsible thread
+      while (BufferOffset > Buffer.size()) {
+        std::this_thread::yield();
+      }
+    }
     AppendData(Data);
     return;
   }
