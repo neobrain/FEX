@@ -801,7 +801,8 @@ SyscallHandler::SyscallHandler(FEXCore::Context::Context* _CTX, FEX::HLE::Signal
     auto SetConfig = [&]<typename Type>(FEXCore::Config::ConfigOption Option) {
       // TODO: Skip all options not relevant for caching; consider including relevant options that are set to their defaults
       if (Option == FEXCore::Config::CONFIG_APP_FILENAME || Option == FEXCore::Config::CONFIG_APP_CONFIG_NAME ||
-          Option == FEXCore::Config::CONFIG_HIDEHYPERVISORBIT) {
+          Option == FEXCore::Config::CONFIG_HIDEHYPERVISORBIT || Option == FEXCore::Config::CONFIG_ENV ||
+          Option == FEXCore::Config::CONFIG_HOSTENV || Option == FEXCore::Config::CONFIG_ADDITIONALARGUMENTS) {
         return;
       }
 
