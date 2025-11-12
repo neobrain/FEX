@@ -1303,4 +1303,9 @@ bool FileManager::IsRootFSFD(int dirfd, uint64_t inode) const {
   return false;
 }
 
+bool FileManager::IsPathOfForwardedLibrary(std::string_view Path) {
+  // TODO: Detect this more reliably
+  return Path.ends_with("-guest.so");
+}
+
 } // namespace FEX::HLE

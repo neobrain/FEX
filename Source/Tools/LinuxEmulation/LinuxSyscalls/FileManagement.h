@@ -95,6 +95,7 @@ public:
 
   void UpdatePID(uint32_t PID);
   bool IsRootFSFD(int dirfd, uint64_t inode) const;
+  bool IsPathOfForwardedLibrary(std::string_view);
 
   fextl::string GetEmulatedPath(const char* pathname, bool FollowSymlink = false) const;
   fextl::string GetHostPath(fextl::string& Path, bool AliasedOnly) const;

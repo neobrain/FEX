@@ -291,6 +291,7 @@ public:
   LookupExecutableFileSection(FEXCore::Core::InternalThreadState& Thread, uint64_t GuestAddr) final override;
 
   void TriggerPostStartupCodeCacheLoad(FEXCore::Core::InternalThreadState&);
+  void TriggerGuestLibWrapperCodeCacheLoad(FEXCore::Core::InternalThreadState&, uint64_t AnyAddr);
 
   FEXCore::HLE::ExecutableRangeInfo QueryGuestExecutableRange(FEXCore::Core::InternalThreadState* Thread, uint64_t Address) override;
 

@@ -393,6 +393,42 @@ uint64_t SyscallHandler::GuestMremap(bool Is64Bit, FEXCore::Core::InternalThread
   return Result;
 }
 
+void SyscallHandler::TriggerGuestLibWrapperCodeCacheLoad(FEXCore::Core::InternalThreadState& Thread, uint64_t AnyAddr) {
+  // TODO: Lock is required, but then LookupExecutableFileSection will deadlock
+  // auto lk = FEXCore::GuardSignalDeferringSection<std::shared_lock>(VMATracking.Mutex, &Thread);
+  auto VMAEntry = VMATracking.FindVMAEntry(reinterpret_cast<uint64_t>(AnyAddr));
+
+  std::byte* MappedCache = nullptr;
+  uint64_t CacheFileSize;
+  for (auto* VMA = VMAEntry->second.Resource->FirstVMA; VMA; VMA = VMA->ResourceNextVMA) {
+    if (!VMA->Prot.Executable) {
+      continue;
+    }
+
+    auto SectionInfo = LookupExecutableFileSection(Thread, VMA->Base);
+    if (!MappedCache) {
+      auto CacheFilename = fextl::fmt::format("{}cache/{}-{:016x}", FEX::Config::GetCacheDirectory(),
+                                              FEXCore::CodeMap::GetBaseFilename(SectionInfo->FileInfo, false), CodeCacheConfigId);
+      int FD = open(CacheFilename.c_str(), O_RDONLY);
+      if (FD == -1) {
+        return;
+      }
+      struct stat buf;
+      if ((fstat(FD, &buf) != 0)) {
+        close(FD);
+        return;
+      }
+      CacheFileSize = buf.st_size;
+      MappedCache = (std::byte*)FEXCore::Allocator::mmap(nullptr, CacheFileSize, PROT_READ, MAP_PRIVATE, FD, 0);
+    }
+
+    CTX->GetCodeCache().LoadData(Thread, MappedCache, *SectionInfo);
+  }
+  if (MappedCache) {
+    FEXCore::Allocator::munmap(MappedCache, CacheFileSize);
+  }
+}
+
 uint64_t SyscallHandler::GuestMprotect(FEXCore::Core::InternalThreadState* Thread, void* addr, size_t len, int prot) {
   uint64_t Result {};
 
@@ -626,7 +662,11 @@ FEXCore::ExecutableFileInfo* SyscallHandler::TrackMmap(FEXCore::Core::InternalTh
   if (Resource && VMATracking::VMAProt::fromProt(prot).Executable) {
     // LogMan::Msg::IFmt("LOADING AOT CACHE ENTRY: {}", Resource->MappedFile->Filename);
 
-    if (Thread) {
+    if (FM.IsPathOfForwardedLibrary(Resource->MappedFile->Filename)) {
+      // Delay this until LoadLib is called for this library.
+      // Before that, we can't patch up the SHA256 function identifiers.
+      LogMan::Msg::IFmt("Delaying code cache load for {}", Resource->MappedFile->Filename);
+    } else if (Thread) {
       // TODO: Move this to first compile?
       if (!WineCase) {
         return Resource->MappedFile.get();
