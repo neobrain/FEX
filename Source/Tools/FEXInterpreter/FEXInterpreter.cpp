@@ -168,17 +168,18 @@ fextl::unique_ptr<FEX::HLE::MemAllocator> InitAllocator(bool Is64Bit) {
   FEXCore::Allocator::SetupHooks(PageSize > 0 ? PageSize : FEXCore::Utils::FEX_PAGE_SIZE);
   auto Allocator = FEX::HLE::CreatePassthroughAllocator();
 
+  // NOTE: Probably fixed again thanks to envp fix
   // Now that the upper 32-bit address space is blocked for future allocations,
   // exhaust all of jemalloc's remaining internal allocations that it reserved before.
   // TODO: It's unclear how reliably this exhausts those reserves
   // TODO: This will likely consume one arena inside the 32-bit VA space.
   //   - (HdkR): I've noticed jemalloc consuming an 8MB arena commonly.
-  FEXCore::Allocator::YesIKnowImNotSupposedToUseTheGlibcAllocator glibc;
-  void* data;
-  do {
-    data = malloc(0x1);
-  } while (reinterpret_cast<uintptr_t>(data) >> 32 != 0);
-  free(data);
+  // FEXCore::Allocator::YesIKnowImNotSupposedToUseTheGlibcAllocator glibc;
+  // void* data;
+  // do {
+  //   data = malloc(0x1);
+  // } while (reinterpret_cast<uintptr_t>(data) >> 32 != 0);
+  // free(data);
 
   return Allocator;
 }

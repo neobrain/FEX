@@ -210,7 +210,7 @@ private:
 };
 
 void ThunkHandler_impl::LoadLib(std::string_view Name) {
-  auto SOName = ThunkHostLibsPath();
+  auto SOName = ThunkHostLibsPath(); // TODO: Portable support?
   while (SOName.ends_with('/')) {
     SOName.pop_back();
   }
