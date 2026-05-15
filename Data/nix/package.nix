@@ -4,6 +4,8 @@
   enableConfigUI ? true,
   enableLibraryForwarding ? true,
   gitRev ? "0000000000000000000000000000000000000000",
+  # Source tree with submodules populated
+  src,
 }:
 
 let
@@ -24,7 +26,7 @@ let
 in
 pkgs.clangStdenv.mkDerivation {
   name = "fex";
-  src = ../../.;
+  inherit src;
 
   nativeBuildInputs =
     with pkgs;
