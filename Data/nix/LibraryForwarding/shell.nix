@@ -16,11 +16,11 @@ let
       pkgs.libdrm.dev
       pkgs.libGL.dev
       pkgs.wayland.dev
-      pkgs.xorg.libX11.dev
-      pkgs.xorg.libxcb.dev
-      pkgs.xorg.libXrandr.dev
-      pkgs.xorg.libXrender.dev
-      pkgs.xorg.xorgproto
+      pkgs.libX11.dev
+      pkgs.libxcb.dev
+      pkgs.libXrandr.dev
+      pkgs.libXrender.dev
+      pkgs.xorgproto
     ];
     ignoreCollisions = true;
     pathsToLink = [
