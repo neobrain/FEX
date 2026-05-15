@@ -28,30 +28,28 @@ pkgs.mkShell.override { stdenv = pkgs.clangStdenv; } {
   # TODO: vulkan-tools-lunarg, enable via VK_INSTANCE_LAYERS=VK_LAYER_LUNARG_api_dump (and maybe VK_LAYER_PATH=${vulkan-tools-lunarg}/share/vulkan/explicit_layer.d)
 
   env = {
+    CMAKE_GENERATOR = "Ninja";
+
     # Packages like mold must be unwrapped to get the required linker name
     LDFLAGS = "-fuse-ld=${linkerPackage.NIX_MAIN_PROGRAM or linkerPackage.pname}";
 
     # Set Qt runtime paths that wrapQtAppsHook would normally handle
-    QT_PLUGIN_PATH = with pkgs;
-      lib.optionalString enableConfigUI (
-        lib.makeSearchPath "lib/qt-6/plugins" [
-          qt6.qtbase
-          qt6.qtwayland
-        ]
-      );
-    QML2_IMPORT_PATH = with pkgs;
-      lib.optionalString enableConfigUI (
-        lib.makeSearchPath "lib/qt-6/qml" [
-          qt6.qtbase
-          qt6.qtdeclarative
-        ]
-      );
+    QT_PLUGIN_PATH = pkgs.lib.optionalString enableConfigUI (
+      pkgs.lib.makeSearchPath "lib/qt-6/plugins" [
+        pkgs.qt6.qtbase
+        pkgs.qt6.qtwayland
+      ]
+    );
+    QML2_IMPORT_PATH = pkgs.lib.optionalString enableConfigUI (
+      pkgs.lib.makeSearchPath "lib/qt-6/qml" [
+        pkgs.qt6.qtbase
+        pkgs.qt6.qtdeclarative
+      ]
+    );
 
     # Use portable mode to ignore binfmt handlers
     FEX_PORTABLE = 1;
     FEX_ROOTFS = "${fexPkg.passthru.rootfs}";
-
-    CMAKE_GENERATOR = "Ninja";
   };
 
   shellHook = ''

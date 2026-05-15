@@ -13,7 +13,9 @@
     { self, nixpkgs }:
     let
       pkgs = nixpkgs.legacyPackages.aarch64-linux;
-      gitRev = self.rev or (pkgs.lib.removeSuffix "-dirty" (self.dirtyRev or "0000000000000000000000000000000000000000"));
+      gitRev =
+        self.rev
+          or (pkgs.lib.removeSuffix "-dirty" (self.dirtyRev or "0000000000000000000000000000000000000000"));
 
       # Require impure builds to avoid pulling submodules just for the dev shell
       flakeRoot =

@@ -66,15 +66,20 @@ pkgs.clangStdenv.mkDerivation {
   # wrapQtAppsHook otherwise wraps every executable in $out/bin; we only want FEXConfig wrapped.
   dontWrapQtApps = true;
 
-  postFixup =
-    ''
-      # FEXRootFSFetcher shells out to unsquashfs / mksquashfs / mkfs.erofs
-      wrapProgram $out/bin/FEXRootFSFetcher \
-        --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.erofs-utils pkgs.squashfsTools pkgs.squashfuse ]}
-    ''
-    + pkgs.lib.optionalString enableConfigUI ''
-      wrapQtApp $out/bin/FEXConfig
-    '';
+  postFixup = ''
+    # FEXRootFSFetcher shells out to unsquashfs / mksquashfs / mkfs.erofs
+    wrapProgram $out/bin/FEXRootFSFetcher \
+      --prefix PATH : ${
+        pkgs.lib.makeBinPath [
+          pkgs.erofs-utils
+          pkgs.squashfsTools
+          pkgs.squashfuse
+        ]
+      }
+  ''
+  + pkgs.lib.optionalString enableConfigUI ''
+    wrapQtApp $out/bin/FEXConfig
+  '';
 
   passthru = {
     inherit rootfs;
