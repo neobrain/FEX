@@ -2,17 +2,14 @@
 {
   pkgs ? import <nixpkgs> { },
   enableConfigUI ? true,
-  enableLibraryForwarding ? true,
   linkerPackage ? pkgs.mold,
 }:
 
 let
-  libForwardingShell = import ./LibraryForwarding/shell.nix { inherit pkgs; };
-  fexPkg = import ./package.nix { inherit pkgs enableConfigUI enableLibraryForwarding; };
+  fexPkg = import ./package.nix { inherit pkgs enableConfigUI; };
 in
 pkgs.mkShell.override { stdenv = pkgs.clangStdenv; } {
-  inputsFrom = [ fexPkg ] ++ pkgs.lib.optionals enableLibraryForwarding [ libForwardingShell ];
-  inherit (libForwardingShell) FEX_CMAKE_TOOLCHAINS ROOTFS;
+  inputsFrom = [ fexPkg ];
 
   packages = with pkgs; [
     # Build tools
@@ -30,7 +27,7 @@ pkgs.mkShell.override { stdenv = pkgs.clangStdenv; } {
 
   # TODO: vulkan-tools-lunarg, enable via VK_INSTANCE_LAYERS=VK_LAYER_LUNARG_api_dump (and maybe VK_LAYER_PATH=${vulkan-tools-lunarg}/share/vulkan/explicit_layer.d)
 
-  env = fexPkg.passthru.env // {
+  env = {
     # Packages like mold must be unwrapped to get the required linker name
     LDFLAGS = "-fuse-ld=${linkerPackage.NIX_MAIN_PROGRAM or linkerPackage.pname}";
 
@@ -54,15 +51,12 @@ pkgs.mkShell.override { stdenv = pkgs.clangStdenv; } {
     FEX_PORTABLE = 1;
     FEX_ROOTFS = "${fexPkg.passthru.rootfs}";
 
-    LD_LIBRARY_PATH = with pkgs;
-      lib.optionalString enableLibraryForwarding (lib.makeLibraryPath [ vulkan-loader ]);
-
     CMAKE_GENERATOR = "Ninja";
   };
 
   shellHook = ''
     echo "RootFS: ${fexPkg.passthru.rootfs}"
-    echo "Configure CMake for FEX build: cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo \$FEX_CMAKE_TOOLCHAINS -DBUILD_THUNKS=ON"
+    echo "Configure CMake for FEX build: cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo"
   '';
 
   meta.description = "Shell for local FEX development";
