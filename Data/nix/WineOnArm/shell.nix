@@ -1,4 +1,6 @@
-{ pkgs ? import <nixpkgs> { } }:
+{
+  pkgs ? import <nixpkgs> { },
+}:
 
 let
   toolchain = pkgs.fetchzip {
@@ -9,7 +11,11 @@ let
   cmakeToolchainFile = pkgs.substitute {
     # Use absolute paths that are discoverable outside of the nix shell
     src = ../../CMake/toolchain_mingw.cmake;
-    substitutions = ["--replace-fail" "\${MINGW_TRIPLE}-" "${toolchain}/bin/\${MINGW_TRIPLE}-"];
+    substitutions = [
+      "--replace-fail"
+      "\${MINGW_TRIPLE}-"
+      "${toolchain}/bin/\${MINGW_TRIPLE}-"
+    ];
   };
 
   mesonCrossFile = pkgs.writeText "crossfile_llvm_mingw.txt" ''
