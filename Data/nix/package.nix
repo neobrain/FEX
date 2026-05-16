@@ -4,7 +4,7 @@
   enableConfigUI ? true,
   gitRev ? "0000000000000000000000000000000000000000",
   # Source tree with submodules populated
-  src,
+  src ? null,
 }:
 
 let
