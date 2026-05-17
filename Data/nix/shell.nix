@@ -55,6 +55,17 @@ pkgs.mkShell.override { stdenv = pkgs.clangStdenv; } {
   shellHook = ''
     echo "RootFS: ${fexPkg.passthru.rootfs}"
     echo "Configure CMake for FEX build: cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo"
+
+    # Drop /nix/store paths of ARM builds for essential tools (bash, ldd) from PATH.
+    # Within a FEXBash, these would take priority over the x86 RootFS.
+    # Outside a FEXBash, they are also present in /usr/bin anyway.
+    strip_bash_from_path() {
+      PATH=$(echo "$PATH" | sed -E 's#(${pkgs.bashInteractive}|${pkgs.bashNonInteractive}|${pkgs.glibc.bin}|${pkgs.pkgsCross.gnu64.glibc.bin}|${pkgs.pkgsCross.gnu32.glibc.bin})/bin:##g')
+    }
+    # Call once for non-interactive shells;
+    # add to PROMPT_COMMAND for interactive shells
+    strip_bash_from_path
+    PROMPT_COMMAND="strip_bash_from_path''${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
   '';
 
   meta.description = "Shell for local FEX development";
