@@ -2,14 +2,17 @@
 {
   pkgs ? import <nixpkgs> { },
   enableConfigUI ? true,
+  enableLibraryForwarding ? true,
   linkerPackage ? pkgs.mold,
 }:
 
 let
-  fexPkg = import ./package.nix { inherit pkgs enableConfigUI; };
+  libForwardingShell = import ./LibraryForwarding/shell.nix { inherit pkgs; };
+  fexPkg = import ./package.nix { inherit pkgs enableConfigUI enableLibraryForwarding; };
 in
 pkgs.mkShell.override { stdenv = pkgs.clangStdenv; } {
-  inputsFrom = [ fexPkg ];
+  inputsFrom = [ fexPkg ] ++ pkgs.lib.optionals enableLibraryForwarding [ libForwardingShell ];
+  inherit (libForwardingShell) FEX_CMAKE_TOOLCHAINS ROOTFS;
 
   packages = with pkgs; [
     # Build tools
@@ -27,11 +30,14 @@ pkgs.mkShell.override { stdenv = pkgs.clangStdenv; } {
 
   # TODO: vulkan-tools-lunarg, enable via VK_INSTANCE_LAYERS=VK_LAYER_LUNARG_api_dump (and maybe VK_LAYER_PATH=${vulkan-tools-lunarg}/share/vulkan/explicit_layer.d)
 
-  env = {
+  env = fexPkg.passthru.env // {
     CMAKE_GENERATOR = "Ninja";
 
     # Packages like mold must be unwrapped to get the required linker name
     LDFLAGS = "-fuse-ld=${linkerPackage.NIX_MAIN_PROGRAM or linkerPackage.pname}";
+
+    LD_LIBRARY_PATH = with pkgs;
+      lib.optionalString enableLibraryForwarding (lib.makeLibraryPath [ vulkan-loader ]);
 
     # Set Qt runtime paths that wrapQtAppsHook would normally handle
     QT_PLUGIN_PATH = pkgs.lib.optionalString enableConfigUI (
@@ -54,7 +60,7 @@ pkgs.mkShell.override { stdenv = pkgs.clangStdenv; } {
 
   shellHook = ''
     echo "RootFS: ${fexPkg.passthru.rootfs}"
-    echo "Configure CMake for FEX build: cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo"
+    echo "Configure CMake for FEX build: cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo \$FEX_CMAKE_TOOLCHAINS -DBUILD_THUNKS=ON"
 
     # Drop /nix/store paths of ARM builds for essential tools (bash, ldd) from PATH.
     # Within a FEXBash, these would take priority over the x86 RootFS.
