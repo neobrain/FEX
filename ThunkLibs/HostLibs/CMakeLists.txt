@@ -7,13 +7,22 @@ option(ENABLE_CLANG_THUNKS "Enable building thunks with clang" FALSE)
 
 find_package(PkgConfig REQUIRED)
 
-# Helper to add include directories from pkg-config, falling back to global defaults if not available.
-# /usr/include is dropped to avoid mixing foreign-architecture standard library headers.
-function(target_include_directories_from_pkgconfig target pkg)
+# Helper to add header/library directories from pkgconfig, falling back to
+# global defaults if not available:
+# - /usr/include is dropped to avoid mixing foreign-architecture standard
+#   library headers
+# - Library directories are added to DT_RUNPATH, which ensures `dlopen` will
+#   find the host library at runtime
+# - If no pkgconfig package is found, fallback include directories are taken
+#   from the provided extra arguments. No library paths are added in that case
+function(target_use_pkgconfig target pkg)
   pkg_check_modules(PKG QUIET ${pkg})
   if (PKG_FOUND)
     list(REMOVE_ITEM PKG_INCLUDE_DIRS /usr/include)
     target_include_directories(${target} INTERFACE ${PKG_INCLUDE_DIRS})
+    foreach(libdir IN LISTS PKG_LIBRARY_DIRS)
+      target_link_options(${target} INTERFACE "LINKER:-rpath,${libdir}")
+    endforeach()
   elseif (ARGN)
     target_include_directories(${target} INTERFACE ${ARGN})
   endif()
@@ -126,7 +135,7 @@ foreach(GUEST_BITNESS IN LISTS BITNESS_LIST)
   #add_host_lib(fex_malloc ${GUEST_BITNESS})
 
   generate(libasound ${CMAKE_CURRENT_SOURCE_DIR}/../libasound/libasound_interface.cpp ${GUEST_BITNESS})
-  target_include_directories_from_pkgconfig(libasound-${GUEST_BITNESS}-deps alsa)
+  target_use_pkgconfig(libasound-${GUEST_BITNESS}-deps alsa)
   add_host_lib(asound ${GUEST_BITNESS})
 
   # disabled for now, headers are platform specific
@@ -136,7 +145,7 @@ foreach(GUEST_BITNESS IN LISTS BITNESS_LIST)
   # target_include_directories(SDL2-host PRIVATE ${SDL2_INCLUDE_DIRS})
 
   generate(libdrm ${CMAKE_CURRENT_SOURCE_DIR}/../libdrm/libdrm_interface.cpp ${GUEST_BITNESS})
-  target_include_directories_from_pkgconfig(libdrm-${GUEST_BITNESS}-deps libdrm /usr/include/drm /usr/include/libdrm)
+  target_use_pkgconfig(libdrm-${GUEST_BITNESS}-deps libdrm /usr/include/drm /usr/include/libdrm)
   add_host_lib(drm ${GUEST_BITNESS})
 endforeach()
 
@@ -149,20 +158,21 @@ foreach(GUEST_BITNESS IN LISTS BITNESS_LIST)
 
   generate(libvulkan ${CMAKE_CURRENT_SOURCE_DIR}/../libvulkan/libvulkan_interface.cpp ${GUEST_BITNESS})
   target_include_directories(libvulkan-${GUEST_BITNESS}-deps INTERFACE ${FEX_PROJECT_SOURCE_DIR}/External/Vulkan-Headers/include/)
-  target_include_directories_from_pkgconfig(libvulkan-${GUEST_BITNESS}-deps "xcb;x11;xrandr;xrender")
+  target_use_pkgconfig(libvulkan-${GUEST_BITNESS}-deps vulkan)
+  target_use_pkgconfig(libvulkan-${GUEST_BITNESS}-deps "xcb;x11;xrandr;xrender")
   add_host_lib(vulkan ${GUEST_BITNESS})
 
   generate(libwayland-client ${CMAKE_CURRENT_SOURCE_DIR}/../libwayland-client/libwayland-client_interface.cpp ${GUEST_BITNESS})
   add_host_lib(wayland-client ${GUEST_BITNESS})
-  target_include_directories_from_pkgconfig(libwayland-client-${GUEST_BITNESS}-deps wayland-client /usr/include/wayland)
+  target_use_pkgconfig(libwayland-client-${GUEST_BITNESS}-deps wayland-client /usr/include/wayland)
 
   generate(libEGL ${CMAKE_CURRENT_SOURCE_DIR}/../libEGL/libEGL_interface.cpp ${GUEST_BITNESS})
-  target_include_directories_from_pkgconfig(libEGL-${GUEST_BITNESS}-deps egl)
+  target_use_pkgconfig(libEGL-${GUEST_BITNESS}-deps egl)
   add_host_lib(EGL ${GUEST_BITNESS})
 
   generate(libGL ${CMAKE_CURRENT_SOURCE_DIR}/../libGL/libGL_interface.cpp ${GUEST_BITNESS})
-  target_include_directories_from_pkgconfig(libGL-${GUEST_BITNESS}-deps gl)
-  target_include_directories_from_pkgconfig(libGL-${GUEST_BITNESS}-deps "xcb;x11;xrandr;xrender")
+  target_use_pkgconfig(libGL-${GUEST_BITNESS}-deps gl)
+  target_use_pkgconfig(libGL-${GUEST_BITNESS}-deps "xcb;x11;xrandr;xrender")
   add_host_lib(GL ${GUEST_BITNESS})
 
   find_package(OpenGL REQUIRED)

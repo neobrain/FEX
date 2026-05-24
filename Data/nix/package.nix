@@ -114,20 +114,7 @@ pkgs.clangStdenv.mkDerivation {
           pkgs.squashfuse
         ]
       }
-    ''
-    + pkgs.lib.optionalString enableLibraryForwarding ''
-      # Add RPATH to host-side wrappers so dlopen works at runtime
-      for libsdir in $out/lib/fex-emu/HostThunks; do
-        patchelf --add-rpath "${pkgs.alsa-lib}/lib"      "$libsdir/libasound-host.so"
-        patchelf --add-rpath "${pkgs.libdrm}/lib"        "$libsdir/libdrm-host.so"
-        patchelf --add-rpath "${pkgs.vulkan-loader}/lib" "$libsdir/libvulkan-host.so"
-      done
-      for libsdir in $out/lib/fex-emu/HostThunks $out/lib/fex-emu/HostThunks_32; do
-        patchelf --add-rpath "${pkgs.libglvnd}/lib"      "$libsdir/libEGL-host.so"
-        patchelf --add-rpath "${pkgs.libglvnd}/lib"      "$libsdir/libGL-host.so"
-        patchelf --add-rpath "${pkgs.wayland}/lib"       "$libsdir/libwayland-client-host.so"
-      done
-    ''
+  ''
   + pkgs.lib.optionalString enableConfigUI ''
     wrapQtApp $out/bin/FEXConfig
   '';
