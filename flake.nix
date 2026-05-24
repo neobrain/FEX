@@ -4,6 +4,7 @@
 # Examples:
 #   nix develop:                        Enter a shell for local FEX development
 #   nix profile install --impure .#fex: Install FEX to ~/.nix-profile (with pre-configured x86 RootFS)
+#   nix run .#install-binfmt /fex/path: Register FEX as binfmt handler
 #   nix fmt:                            Reformat source files
 #   nix flake show:                     List all available targets
 {
@@ -37,6 +38,38 @@
         };
       };
       packages.aarch64-linux.default = self.packages.aarch64-linux.fex;
+
+      # Installs FEX as a binfmt handler via systemd-binfmt.
+      # When called without arguments, FEX will be built in the Nix sandbox first.
+      # To use an existing FEX build, pass it as a parameter:
+      #   sudo nix run .#install-binfmt /path/to/FEX
+      apps.aarch64-linux.install-binfmt = {
+        type = "app";
+        meta.description = "Install FEX as a binfmt handler (either provided by argument, or built from flake fex target)";
+        program = toString (
+          pkgs.writeShellScript "fex-install-binfmt" ''
+            set -eu
+            FEX_BIN="''${1:-}" # TODO: Run realpath on this
+            if [ -z "$FEX_BIN" ]; then
+              echo "No FEX binary given, building one..." >&2
+              FEX_BIN="$(nix build --impure --no-link --print-out-paths .#fex)/bin/FEX"
+            fi
+            if [ ! -x "$FEX_BIN" ]; then
+              echo "FEX binary not found or not executable: $FEX_BIN" >&2
+              exit 1
+            fi
+            if [ "$(id -u)" -ne 0 ]; then
+              exec sudo "$0" "$FEX_BIN"
+            fi
+            mkdir -p /etc/binfmt.d
+            for arch in "x86" "x86_64"; do
+              sed "s|@CMAKE_INSTALL_PREFIX@/bin/FEX|$FEX_BIN|g" "${self}/Data/binfmts/FEX-$arch.conf.in" > /etc/binfmt.d/FEX-$arch.conf
+            done
+            systemctl restart systemd-binfmt.service
+            echo "Installed $FEX_BIN as binfmt handler" >&2
+          ''
+        );
+      };
 
       # nix fmt
       formatter.aarch64-linux = pkgs.writeShellApplication {
