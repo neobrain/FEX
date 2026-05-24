@@ -5,6 +5,7 @@
 #   nix develop:                           Enter a shell for local FEX development
 #   nix profile install .submodules=1#fex: Install FEX to ~/.nix-profile (with pre-configured x86 RootFS)
 #   nix run .#install-binfmt /path/to/fex: Register FEX as binfmt handler
+#   nix run .#run-steam:                   Install and launch Steam
 #   nix fmt:                               Reformat source files
 #   nix flake show:                        List all available targets
 {
@@ -13,7 +14,10 @@
   outputs =
     { self, nixpkgs }:
     let
-      pkgs = nixpkgs.legacyPackages.aarch64-linux;
+      pkgs = import nixpkgs {
+        system = "aarch64-linux";
+        config.allowUnfree = true; # needed for Steam
+      };
       gitRev =
         self.rev
           or (pkgs.lib.removeSuffix "-dirty" (self.dirtyRev or "0000000000000000000000000000000000000000"));
@@ -28,6 +32,8 @@
         # TODO: Verify submodules are initialized. if not, point to submodules=1
       };
       packages.aarch64-linux.default = self.packages.aarch64-linux.fex;
+
+      packages.aarch64-linux.run-steam = pkgs.callPackage ./Data/nix/run_steam.nix { };
 
       # Installs FEX as a binfmt handler via systemd-binfmt.
       # When called without arguments, FEX will be built in the Nix sandbox first.
