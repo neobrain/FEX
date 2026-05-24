@@ -97,7 +97,8 @@ int main(int argc, char** argv, char** const envp) {
       Envp.emplace_back(envp[i]);
     }
   }
-  Envp.emplace_back(EnchantedPS1(PS1Env).c_str());
+  const std::string NewPS1 = EnchantedPS1(PS1Env);
+  Envp.emplace_back(NewPS1.c_str());
   Envp.emplace_back(nullptr);
 
   return execve(Argv[0], const_cast<char* const*>(Argv.data()), const_cast<char* const*>(&Envp[0]));
