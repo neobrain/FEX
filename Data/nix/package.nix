@@ -86,6 +86,17 @@ pkgs.clangStdenv.mkDerivation {
 
   env = sharedEnv;
 
+  # Force ThunkHostLibs/ThunkGuestLibs to the build-time-baked install paths
+  # (LAYER_TOP, highest priority). A user Config.json pinning these to a stale
+  # nix-store path of an older FEX build would otherwise abort startup in
+  # FileManager::SetupOverlay.
+  postPatch = ''
+    substituteInPlace FEXCore/Source/Interface/Config/Config.cpp \
+      --replace-fail \
+        ''$'void ReloadMetaLayer() {\n  Meta->Load();' \
+        ''$'void ReloadMetaLayer() {\n  Meta->Load();\n  Meta->Set(FEXCore::Config::CONFIG_THUNKHOSTLIBS, detail::THUNKHOSTLIBS);\n  Meta->Set(FEXCore::Config::CONFIG_THUNKGUESTLIBS, detail::THUNKGUESTLIBS);'
+  '';
+
   # Install a default Config.json pointing at the bundled RootFS so the
   # installed binaries work out of the box without further user setup.
   postInstall = ''
@@ -93,9 +104,7 @@ pkgs.clangStdenv.mkDerivation {
     cat > $out/share/fex-emu/Config.json <<EOF
     {
       "Config": {
-        "RootFS": "${rootfs}",
-        "ThunkHostLibs": "$out/lib/fex-emu/HostThunks",
-        "ThunkGuestLibs": "$out/share/fex-emu/GuestThunks"
+        "RootFS": "${rootfs}"
       }
     }
     EOF
@@ -103,6 +112,15 @@ pkgs.clangStdenv.mkDerivation {
 
   # wrapQtAppsHook otherwise wraps every executable in $out/bin; we only want FEXConfig wrapped.
   dontWrapQtApps = true;
+
+  # stdenv's patchELF fixup runs `patchelf --shrink-rpath`, which drops rpath
+  # entries whose dirs don't contain a DT_NEEDED library. The host thunks
+  # (libvulkan-host.so etc.) dlopen their targets at runtime, so libvulkan.so.1,
+  # libdrm.so.2, libasound.so.2, libwayland-client.so.0 and friends never appear
+  # in DT_NEEDED and the carefully-set rpaths get stripped. Skip the shrink to
+  # preserve them. Closure impact is zero — the relevant paths are already
+  # transitively pulled in via Qt/FEXConfig.
+  dontPatchELF = true;
 
   postFixup = ''
     # FEXRootFSFetcher shells out to unsquashfs / mksquashfs / mkfs.erofs
